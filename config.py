@@ -40,7 +40,7 @@ SEO_SETTINGS = {
 }
 
 # URL nastavení pro obrázky
-IMAGE_BASE_URL = "https://vase-domena.cz"  # Změňte na vaši doménu
+IMAGE_BASE_URL = "https://storage.googleapis.com/sportovni-eshop-produkty-fotky"  # Změňte na vaši doménu
 
 # Nastavení exportu
 EXPORT_SETTINGS = {
