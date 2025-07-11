@@ -13,73 +13,38 @@ Verze: 1.0
 
 import pandas as pd
 import re
-import unicodedata
-import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 import logging
+from utils import create_slug, parse_parameters
+from config import (
+    SEO_SETTINGS,
+    TAG_SETTINGS,
+    VARIANT_SETTINGS,
+    IMAGE_BASE_URL
+)
 
 # Nastavení logování
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class FastCentrikToWooCommerce:
-    """Hlavní třída pro transformaci FastCentrik dat do WooCommerce formátu."""
-    
-    def __init__(self, excel_file_path: str):
+class DataTransformer:
+    """
+    Zodpovídá za transformaci načtených FastCentrik dat do WooCommerce formátu.
+    """
+    def __init__(self, products_df: pd.DataFrame, categories_df: pd.DataFrame):
         """
         Inicializace transformátoru.
-        
+
         Args:
-            excel_file_path (str): Cesta k FastCentrik Excel souboru
+            products_df (pd.DataFrame): DataFrame s produkty.
+            categories_df (pd.DataFrame): DataFrame s kategoriemi.
         """
-        self.excel_file_path = excel_file_path
-        self.products_data = None
-        self.categories_data = None
-        self.parameters_data = None
+        self.products_data = products_df
+        self.categories_data = categories_df
         self.category_mapping = {}
         self.woo_products = []
-        
-        # WooCommerce mapping
-        self.woo_columns = [
-            'ID', 'Type', 'SKU', 'Name', 'Published', 'Is featured?',
-            'Visibility in catalog', 'Short description', 'Description', 
-            'Date sale price starts', 'Date sale price ends', 'Tax status',
-            'Tax class', 'In stock?', 'Stock', 'Low stock amount', 'Backorders allowed?',
-            'Sold individually?', 'Weight (kg)', 'Length (cm)', 'Width (cm)', 'Height (cm)',
-            'Allow customer reviews?', 'Purchase note', 'Sale price', 'Regular price',
-            'Categories', 'Tags', 'Shipping class', 'Images', 'Download limit',
-            'Download expiry days', 'Parent', 'Grouped products', 'Upsells', 'Cross-sells',
-            'External URL', 'Button text', 'Position', 'Attribute 1 name', 'Attribute 1 value(s)',
-            'Attribute 1 visible', 'Attribute 1 global', 'Attribute 2 name', 'Attribute 2 value(s)',
-            'Attribute 2 visible', 'Attribute 2 global', 'Attribute 3 name', 'Attribute 3 value(s)',
-            'Attribute 3 visible', 'Attribute 3 global', 'Meta: _yoast_wpseo_title',
-            'Meta: _yoast_wpseo_metadesc', 'Meta: _yoast_wpseo_focuskw'
-        ]
-    
-    def load_data(self) -> None:
-        """Načte data ze všech listů Excel souboru."""
-        logger.info(f"Načítám data z {self.excel_file_path}")
-        
-        try:
-            # Načtení produktů
-            self.products_data = pd.read_excel(self.excel_file_path, sheet_name='Zbozi')
-            logger.info(f"Načteno {len(self.products_data)} produktů")
-            
-            # Načtení kategorií
-            self.categories_data = pd.read_excel(self.excel_file_path, sheet_name='Kategorie')
-            logger.info(f"Načteno {len(self.categories_data)} kategorií")
-            
-            # Načtení parametrů
-            self.parameters_data = pd.read_excel(self.excel_file_path, sheet_name='Parametry')
-            logger.info(f"Načteno {len(self.parameters_data)} parametrů")
-            
-            # Vytvoření mapování kategorií
-            self._create_category_mapping()
-            
-        except Exception as e:
-            logger.error(f"Chyba při načítání dat: {e}")
-            raise
+        self.woo_categories = []
     
     def _create_category_mapping(self) -> None:
         """Vytvoří mapování kategorií s hierarchickou strukturou."""
@@ -92,41 +57,11 @@ class FastCentrikToWooCommerce:
                     'name': cat['JmenoKategorie'],
                     'parent': cat.get('KodNadrizeneKategorie', ''),
                     'description': cat.get('PopisKategorie', ''),
-                    'slug': self._create_slug(cat['JmenoKategorie'])
+                    'slug': create_slug(cat['JmenoKategorie'])
                 }
         
         logger.info(f"Vytvořeno mapování pro {len(self.category_mapping)} kategorií")
     
-    def _create_slug(self, text: str) -> str:
-        """Vytvoří URL-friendly slug z textu."""
-        if pd.isna(text):
-            return ""
-        
-        # Převod na malá písmena a normalizace
-        text = str(text).lower()
-        text = unicodedata.normalize('NFKD', text)
-        text = text.encode('ascii', 'ignore').decode('ascii')
-        
-        # Nahrazení mezer a speciálních znaků pomlčkami
-        text = re.sub(r'[^a-z0-9]+', '-', text)
-        text = text.strip('-')
-        
-        return text
-    
-    def _parse_parameters(self, param_string: str) -> Dict[str, str]:
-        """Parsuje parametry z FastCentrik formátu."""
-        if pd.isna(param_string) or not param_string:
-            return {}
-        
-        params = {}
-        param_pairs = param_string.split('##')
-        
-        for pair in param_pairs:
-            if '||' in pair:
-                key, value = pair.split('||', 1)
-                params[key.strip()] = value.strip()
-        
-        return params
     
     def _get_category_path(self, category_id: str) -> str:
         """Získá hierarchickou cestu kategorie."""
@@ -146,36 +81,40 @@ class FastCentrikToWooCommerce:
         return ' > '.join(path)
     
     def _generate_seo_fields(self, product_name: str, category: str) -> Tuple[str, str, str]:
-        """Generuje SEO pole pro produkt."""
-        # SEO title (max 60 znaků)
-        seo_title = product_name[:57] + "..." if len(product_name) > 60 else product_name
+        """Generuje SEO pole pro produkt na základě nastavení v config.py."""
+        # SEO title
+        title_template = f"{{product_name}}{SEO_SETTINGS.get('title_suffix', '')}"
+        seo_title = title_template.format(product_name=product_name)
         
         # Meta description
-        meta_desc = f"Kvalitní {product_name.lower()} v kategorii {category}. ✓ Rychlé dodání ✓ Skvělé ceny ✓ Zákaznická podpora"
-        if len(meta_desc) > 155:
-            meta_desc = meta_desc[:152] + "..."
+        meta_desc = SEO_SETTINGS.get('meta_desc_template', '{product_name}').format(
+            product_name=product_name,
+            category=category
+        )
         
-        # Focus keyword (první 2-3 slova)
-        focus_keyword = ' '.join(product_name.split()[:3]).lower()
+        # Focus keyword
+        word_count = SEO_SETTINGS.get('focus_keyword_words', 3)
+        focus_keyword = ' '.join(product_name.split()[:word_count]).lower()
         
         return seo_title, meta_desc, focus_keyword
     
     def _get_product_images(self, main_image: str, additional_images: str) -> str:
-        """Sestaví seznam obrázků produktu."""
+        """Sestaví seznam obrázků produktu s použitím base URL z configu."""
         images = []
+        base_url = IMAGE_BASE_URL.strip('/')
         
-        if pd.notna(main_image) and main_image:
-            images.append(main_image.strip())
+        if pd.notna(main_image) and main_image.strip():
+            images.append(f"{base_url}/{main_image.strip()}")
         
-        if pd.notna(additional_images) and additional_images:
-            additional = [img.strip() for img in additional_images.split(';') if img.strip()]
+        if pd.notna(additional_images) and additional_images.strip():
+            additional = [f"{base_url}/{img.strip()}" for img in additional_images.split(';') if img.strip()]
             images.extend(additional)
         
         return ','.join(images)
     
     def _create_woo_product(self, row: pd.Series, product_type: str = 'simple', parent_sku: str = '') -> Dict:
         """Vytvoří WooCommerce produkt ze záznamu."""
-        params = self._parse_parameters(row.get('HodnotyParametru', ''))
+        params = parse_parameters(row.get('HodnotyParametru', ''))
         
         # Základní informace
         sku = str(row['KodZbozi'])
@@ -205,23 +144,23 @@ class FastCentrikToWooCommerce:
         attr_counter = 1
         
         # Přidání hlavních atributů
-        important_attrs = ['velikost', 'barva', 'pohlavi', 'sport', 'material']
-        for attr in important_attrs:
-            if attr in params and attr_counter <= 3:
-                attributes[f'Attribute {attr_counter} name'] = attr.title()
-                attributes[f'Attribute {attr_counter} value(s)'] = params[attr]
-                attributes[f'Attribute {attr_counter} visible'] = '1'
-                attributes[f'Attribute {attr_counter} global'] = '1'
-                attr_counter += 1
-        
+        for attr_name, attr_value in params.items():
+            if attr_counter > 3:
+                break
+            attributes[f'Attribute {attr_counter} name'] = attr_name.title()
+            attributes[f'Attribute {attr_counter} value(s)'] = attr_value
+            attributes[f'Attribute {attr_counter} visible'] = '1'
+            attributes[f'Attribute {attr_counter} global'] = '1'
+            attr_counter += 1
+
         # Tagy
         tags = []
-        if 'pohlavi' in params:
-            tags.append(params['pohlavi'])
-        if 'sport' in params:
-            tags.append(params['sport'])
-        if 'material' in params:
-            tags.append(params['material'])
+        if TAG_SETTINGS.get('auto_generate_tags', False):
+            tag_attributes = TAG_SETTINGS.get('tag_attributes', [])
+            for tag_attr in tag_attributes:
+                if tag_attr in params:
+                    tags.append(params[tag_attr])
+            tags = tags[:TAG_SETTINGS.get('max_tags_per_product', 5)]
         
         # WooCommerce produkt
         woo_product = {
@@ -274,7 +213,22 @@ class FastCentrikToWooCommerce:
         
         return woo_product
     
-    def transform_products(self) -> None:
+    def run_transformation(self) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Spustí kompletní transformaci dat a vrátí produkty a kategorie.
+
+        Returns:
+            Tuple[List[Dict], List[Dict]]: Dvojice obsahující seznam produktů a seznam kategorií.
+        """
+        logger.info("=== SPUŠTĚNÍ TRANSFORMACE DAT ===")
+        self._create_category_mapping()
+        self._transform_products()
+        self._transform_categories()
+        self._print_transformation_stats()
+        logger.info("=== TRANSFORMACE DAT DOKONČENA ===")
+        return self.woo_products, self.woo_categories
+
+    def _transform_products(self) -> None:
         """Hlavní metoda pro transformaci produktů."""
         logger.info("Zahajuji transformaci produktů")
         
@@ -314,51 +268,30 @@ class FastCentrikToWooCommerce:
                 self.woo_products.append(variant_product)
         
         logger.info(f"Vytvořeno celkem {len(self.woo_products)} WooCommerce produktů")
-    
+
     def _create_parent_name(self, variants_group: pd.DataFrame) -> str:
-        """Vytvoří název pro hlavní variabilní produkt."""
+        """Vytvoří název pro hlavní variabilní produkt na základě configu."""
         first_product = variants_group.iloc[0]
         name = str(first_product['JmenoZbozi'])
         
         # Odstranění specifických variant z názvu
-        params = self._parse_parameters(first_product.get('HodnotyParametru', ''))
+        params = parse_parameters(first_product.get('HodnotyParametru', ''))
+        attrs_to_remove = VARIANT_SETTINGS.get('parent_name_remove_attrs', [])
         
-        # Odstranění velikosti a barvy z názvu
-        if 'velikost' in params:
-            name = re.sub(r'\b' + re.escape(params['velikost']) + r'\b', '', name, flags=re.IGNORECASE)
-        if 'barva' in params:
-            name = re.sub(r'\b' + re.escape(params['barva']) + r'\b', '', name, flags=re.IGNORECASE)
+        for attr in attrs_to_remove:
+            if attr in params:
+                # Použijeme word boundary \b, aby se nemazaly části slov
+                name = re.sub(r'\b' + re.escape(params[attr]) + r'\b', '', name, flags=re.IGNORECASE)
         
-        # Vyčištění názvu
+        # Vyčištění názvu od dvojitých mezer
         name = re.sub(r'\s+', ' ', name).strip()
         
         return name
-    
-    def export_to_csv(self, output_file: str = 'woocommerce_products.csv') -> None:
-        """Exportuje produkty do WooCommerce CSV."""
-        logger.info(f"Exportuji produkty do {output_file}")
+
+    def _transform_categories(self) -> None:
+        """Transformuje kategorie do formátu pro export."""
+        logger.info("Transformuji kategorie...")
         
-        # Vytvoření DataFrame
-        df = pd.DataFrame(self.woo_products)
-        
-        # Zajištění všech sloupců
-        for col in self.woo_columns:
-            if col not in df.columns:
-                df[col] = ''
-        
-        # Řazení sloupců podle WooCommerce standardu
-        df = df.reindex(columns=self.woo_columns)
-        
-        # Export do CSV
-        df.to_csv(output_file, index=False, encoding='utf-8-sig', sep=',')
-        
-        logger.info(f"Export dokončen: {len(df)} produktů uloženo do {output_file}")
-    
-    def generate_categories_csv(self, output_file: str = 'woocommerce_categories.csv') -> None:
-        """Generuje samostatný CSV soubor s kategoriemi."""
-        logger.info("Generuji CSV s kategoriemi")
-        
-        categories = []
         for cat_id, cat_data in self.category_mapping.items():
             if cat_data['name'] and cat_data['name'] != 'ROOT_1':
                 category = {
@@ -368,43 +301,8 @@ class FastCentrikToWooCommerce:
                     'Category Parent': cat_data['parent'] if cat_data['parent'] != 'ROOT_1' else '',
                     'Category Description': cat_data['description']
                 }
-                categories.append(category)
-        
-        df_categories = pd.DataFrame(categories)
-        df_categories.to_csv(output_file, index=False, encoding='utf-8-sig')
-        
-        logger.info(f"Kategorie exportovány do {output_file}")
-    
-    def run_transformation(self, output_dir: str = './output/') -> None:
-        """Spustí kompletní transformaci."""
-        logger.info("=== SPUŠTĚNÍ FASTCENTRIK TO WOOCOMMERCE TRANSFORMACE ===")
-        
-        # Vytvoření výstupní složky
-        Path(output_dir).mkdir(exist_ok=True)
-        
-        try:
-            # 1. Načtení dat
-            self.load_data()
-            
-            # 2. Transformace produktů
-            self.transform_products()
-            
-            # 3. Export produktů
-            products_file = Path(output_dir) / 'woocommerce_products.csv'
-            self.export_to_csv(str(products_file))
-            
-            # 4. Export kategorií
-            categories_file = Path(output_dir) / 'woocommerce_categories.csv'
-            self.generate_categories_csv(str(categories_file))
-            
-            # 5. Statistiky
-            self._print_transformation_stats()
-            
-            logger.info("=== TRANSFORMACE ÚSPĚŠNĚ DOKONČENA ===")
-            
-        except Exception as e:
-            logger.error(f"Chyba během transformace: {e}")
-            raise
+                self.woo_categories.append(category)
+        logger.info(f"Zpracováno {len(self.woo_categories)} kategorií.")
     
     def _print_transformation_stats(self) -> None:
         """Vypíše statistiky transformace."""
@@ -423,22 +321,3 @@ class FastCentrikToWooCommerce:
         print(f"Celkem kategorií: {len(self.category_mapping)}")
         print("="*50)
 
-
-def main():
-    """Hlavní funkce pro spuštění transformace."""
-    # Konfigurace
-    EXCEL_FILE = "Export_Excel_Lite 1.xls"  # Cesta k vašemu souboru
-    OUTPUT_DIR = "./woocommerce_output/"
-    
-    # Spuštění transformace
-    transformer = FastCentrikToWooCommerce(EXCEL_FILE)
-    transformer.run_transformation(OUTPUT_DIR)
-    
-    print(f"\n✅ Transformace dokončena!")
-    print(f"📁 Výstupní soubory jsou v: {OUTPUT_DIR}")
-    print(f"📄 woocommerce_products.csv - produkty pro import")
-    print(f"📄 woocommerce_categories.csv - kategorie pro import")
-
-
-if __name__ == "__main__":
-    main()

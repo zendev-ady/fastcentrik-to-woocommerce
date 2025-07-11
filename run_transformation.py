@@ -16,15 +16,10 @@ import argparse
 import sys
 from pathlib import Path
 import logging
-from config import *
-
-# Import hlavního transformátoru (předpokládáme, že je v souboru transformer.py)
-try:
-    from transformer import FastCentrikToWooCommerce
-except ImportError:
-    print("❌ Chyba: Nelze importovat FastCentrikToWooCommerce")
-    print("   Ujistěte se, že máte soubor transformer.py ve stejné složce")
-    sys.exit(1)
+from config import INPUT_EXCEL_FILE, OUTPUT_DIRECTORY, ADVANCED_SETTINGS
+from data_loader import DataLoader
+from transformer import DataTransformer
+from csv_exporter import CsvExporter
 
 def setup_logging(level: str = "INFO"):
     """Nastavení logování"""
@@ -85,24 +80,42 @@ def main():
         return
     
     try:
-        # Vytvoření výstupní složky
-        Path(args.output).mkdir(parents=True, exist_ok=True)
+        # 1. Načtení dat
+        loader = DataLoader(args.input)
+        data = loader.load_data()
         
-        # Spuštění transformace
-        transformer = FastCentrikToWooCommerce(args.input)
-        transformer.run_transformation(args.output)
+        # 2. Transformace dat
+        transformer = DataTransformer(
+            products_df=data['products'],
+            categories_df=data['categories']
+        )
+        products, categories = transformer.run_transformation()
+        
+        # 3. Export do CSV
+        exporter = CsvExporter()
+        output_path = Path(args.output)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        exporter.export_products(products, str(output_path))
+        exporter.export_categories(categories, str(output_path))
         
         print("\n🎉 TRANSFORMACE ÚSPĚŠNĚ DOKONČENA!")
         print(f"📄 Soubory jsou uloženy v: {args.output}")
         print("\n📋 Další kroky:")
-        print("1. Zkontrolujte vygenerované CSV soubory")
+        print("1. Zkontrolujte vygenerované CSV soubory v složce 'woocommerce_output'")
         print("2. Importujte kategorie do WooCommerce (woocommerce_categories.csv)")
         print("3. Importujte produkty do WooCommerce (woocommerce_products.csv)")
         
-    except Exception as e:
-        logger.error(f"Chyba během transformace: {e}")
-        print(f"\n❌ Transformace selhala: {e}")
+    except FileNotFoundError:
+        # Chyba je již zalogována v DataLoaderu
         sys.exit(1)
+    except Exception as e:
+        logger.error(f"Došlo k neočekávané chybě během transformace: {e}", exc_info=True)
+        print(f"\n❌ Transformace selhala. Zkontrolujte log soubor 'transformation.log' pro detaily.")
+        sys.exit(1)
+    finally:
+        # Zajistí, že se logy vždy zapíší do souboru
+        logging.shutdown()
 
 if __name__ == "__main__":
     main()
