@@ -104,13 +104,20 @@ class DataTransformer:
         base_url = IMAGE_BASE_URL.strip('/')
         
         if pd.notna(main_image) and main_image.strip():
-            images.append(f"{base_url}/{main_image.strip()}")
+            # Odstraníme počáteční lomítko z cesty k obrázku, pokud existuje
+            image_path = main_image.strip().lstrip('/')
+            images.append(f"{base_url}/{image_path}")
         
         if pd.notna(additional_images) and additional_images.strip():
-            additional = [f"{base_url}/{img.strip()}" for img in additional_images.split(';') if img.strip()]
+            additional = []
+            for img in additional_images.split(';'):
+                if img.strip():
+                    # Odstraníme počáteční lomítko z cesty k obrázku, pokud existuje
+                    image_path = img.strip().lstrip('/')
+                    additional.append(f"{base_url}/{image_path}")
             images.extend(additional)
         
-        return ','.join(images)
+        return ', '.join(images)
     
     def _create_woo_product(self, row: pd.Series, product_type: str = 'simple', parent_sku: str = '') -> Dict:
         """Vytvoří WooCommerce produkt ze záznamu."""
