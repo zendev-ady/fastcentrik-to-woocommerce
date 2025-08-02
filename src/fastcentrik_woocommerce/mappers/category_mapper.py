@@ -49,14 +49,14 @@ class CategoryMapper:
         return {
             "Muži": {
                 "conditions": [
-                    {"params": {"pohlavi": ["pánské", "muž", "men"]}},
-                    {"name_contains": ["pánsk", "muž", "men's"]},
-                    {"params": {"kategorie": ["pánské"]}}
+                    {"params": {"pohlavi": ["pánské", "muž", "men", "unisex"]}},
+                    {"name_contains": ["pánsk", "muž", "men's", "unisex"]},
+                    {"params": {"kategorie": ["pánské", "unisex"]}}
                 ],
                 "subcategories": {
                     "Pánské oblečení": {
                         "conditions": [
-                            {"name_contains": ["oblečení", "mikina", "kalhoty", "tričko", "bunda", "kabát"]},
+                            {"name_contains": ["oblečení", "mikina", "kalhoty", "tričko", "bunda", "kabát", "vesta"]},
                             {"params": {"typ": ["oblečení", "oděv"]}}
                         ],
                         "subcategories": {
@@ -83,9 +83,9 @@ class CategoryMapper:
                             },
                             "Pánské zimní oblečení": {
                                 "conditions": [
-                                    {"name_contains": ["zimní", "bunda", "kabát", "parka", "péřov", "lyžařsk"]},
+                                    {"name_contains": ["zimní", "bunda", "kabát", "parka", "péřov", "lyžařsk", "vesta"]},
                                     {"params": {"sezona": ["zima", "zimní"]}},
-                                    {"params": {"typ": ["bunda", "kabát", "zimní oblečení"]}}
+                                    {"params": {"typ": ["bunda", "kabát", "zimní oblečení", "vesta"]}}
                                 ],
                                 "priority": 9
                             }
@@ -93,14 +93,15 @@ class CategoryMapper:
                     },
                     "Pánské boty": {
                         "conditions": [
-                            {"name_contains": ["boty", "tenisky", "obuv", "kopačky", "tretry", "pantofle", "sandále"]},
+                            {"name_contains": ["boty", "tenisky", "obuv", "kopačky", "tretry", "pantofle", "sandále", "trekové", "turistická"]},
                             {"params": {"typ": ["obuv", "boty"]}}
                         ],
                         "subcategories": {
                             "Pánská outdoorová obuv": {
                                 "conditions": [
-                                    {"name_contains": ["outdoor", "trekk", "trek", "hory", "turistick"]},
-                                    {"params": {"typ": ["outdoor obuv", "trekové boty"]}}
+                                    {"name_contains": ["outdoor", "trekk", "trek", "hory", "turistick", "trekové", "turistická"]},
+                                    {"params": {"typ": ["outdoor obuv", "trekové boty", "turistická obuv"]}},
+                                    {"brand_contains": ["palladium"]}
                                 ],
                                 "priority": 10
                             },
@@ -129,7 +130,7 @@ class CategoryMapper:
                     },
                     "Pánské doplňky": {
                         "conditions": [
-                            {"name_contains": ["batoh", "čepice", "rukavice", "šála", "pásek", "peněženka"]},
+                            {"name_contains": ["batoh", "čepice", "rukavice", "šála", "pásek", "peněženka", "kšiltovka"]},
                             {"params": {"typ": ["doplňky", "příslušenství"]}}
                         ],
                         "subcategories": {
@@ -153,14 +154,14 @@ class CategoryMapper:
             },
             "Ženy": {
                 "conditions": [
-                    {"params": {"pohlavi": ["dámské", "žena", "women"]}},
-                    {"name_contains": ["dámsk", "žen", "women's"]},
-                    {"params": {"kategorie": ["dámské"]}}
+                    {"params": {"pohlavi": ["dámské", "žena", "women", "unisex"]}},
+                    {"name_contains": ["dámsk", "žen", "women's", "unisex", "dívčí"]},
+                    {"params": {"kategorie": ["dámské", "unisex"]}}
                 ],
                 "subcategories": {
                     "Dámské oblečení": {
                         "conditions": [
-                            {"name_contains": ["oblečení", "mikina", "kalhoty", "tričko", "šaty", "sukně"]},
+                            {"name_contains": ["oblečení", "mikina", "kalhoty", "tričko", "šaty", "sukně", "vesta"]},
                             {"params": {"typ": ["oblečení", "oděv"]}}
                         ],
                         "subcategories": {
@@ -187,9 +188,9 @@ class CategoryMapper:
                             },
                             "Dámské zimní oblečení": {
                                 "conditions": [
-                                    {"name_contains": ["zimní", "bunda", "kabát", "parka", "péřov"]},
+                                    {"name_contains": ["zimní", "bunda", "kabát", "parka", "péřov", "vesta"]},
                                     {"params": {"sezona": ["zima", "zimní"]}},
-                                    {"params": {"typ": ["bunda", "kabát", "zimní oblečení"]}}
+                                    {"params": {"typ": ["bunda", "kabát", "zimní oblečení", "vesta"]}}
                                 ],
                                 "priority": 9
                             }
@@ -197,14 +198,15 @@ class CategoryMapper:
                     },
                     "Dámské boty": {
                         "conditions": [
-                            {"name_contains": ["boty", "tenisky", "obuv", "lodičky", "kozačky", "pantofle"]},
+                            {"name_contains": ["boty", "tenisky", "obuv", "lodičky", "kozačky", "pantofle", "trekové", "turistická"]},
                             {"params": {"typ": ["obuv", "boty"]}}
                         ],
                         "subcategories": {
                             "Dámská outdoorová obuv": {
                                 "conditions": [
-                                    {"name_contains": ["outdoor", "trekk", "trek", "turistick"]},
-                                    {"params": {"typ": ["outdoor obuv", "trekové boty"]}}
+                                    {"name_contains": ["outdoor", "trekk", "trek", "turistick", "trekové", "turistická"]},
+                                    {"params": {"typ": ["outdoor obuv", "trekové boty", "turistická obuv"]}},
+                                    {"brand_contains": ["palladium"]}
                                 ],
                                 "priority": 10
                             },
@@ -233,7 +235,7 @@ class CategoryMapper:
                     },
                     "Dámské doplňky": {
                         "conditions": [
-                            {"name_contains": ["batoh", "čepice", "kabelka", "šála", "rukavice"]},
+                            {"name_contains": ["batoh", "čepice", "kabelka", "šála", "rukavice", "kšiltovka"]},
                             {"params": {"typ": ["doplňky", "příslušenství"]}}
                         ],
                         "subcategories": {
@@ -487,6 +489,13 @@ class CategoryMapper:
                                     {"params": {"typ": ["tenisové oblečení"]}}
                                 ],
                                 "priority": 10
+                            },
+                            "Tenisové doplňky": {
+                                "conditions": [
+                                    {"name_contains": ["kšiltovka", "čepice", "cap", "aeroready", "training", "running", "baseball"]},
+                                    {"params": {"typ": ["tenisové doplňky", "čepice"]}}
+                                ],
+                                "priority": 10
                             }
                         }
                     },
@@ -560,22 +569,24 @@ class CategoryMapper:
                     "Bojové sporty": {
                         "conditions": [
                             {"params": {"sport": ["box", "mma", "karate", "judo", "bojové sporty"]}},
-                            {"name_contains": ["box", "mma", "karate", "judo", "bojov"]},
-                            {"params": {"typ": ["bojové vybavení"]}}
+                            {"name_contains": ["box", "mma", "karate", "judo", "bojov", "rukavice", "helma", "figurína", "dummy", "kick-box", "boxersk"]},
+                            {"params": {"typ": ["bojové vybavení", "rukavice", "helma"]}},
+                            {"name_contains": ["boxersk"]}
                         ],
                         "subcategories": {
                             "Box": {
                                 "conditions": [
                                     {"params": {"sport": ["box", "boxing"]}},
                                     {"name_contains": ["box", "boxing", "boxersk"]},
-                                    {"params": {"typ": ["boxerské vybavení"]}}
+                                    {"params": {"typ": ["boxerské vybavení", "rukavice", "helma"]}},
+                                    {"name_contains": ["boxersk"]}
                                 ],
                                 "priority": 10
                             },
                             "MMA": {
                                 "conditions": [
                                     {"params": {"sport": ["mma"]}},
-                                    {"name_contains": ["mma", "mixed martial"]},
+                                    {"name_contains": ["mma", "mixed martial", "figurína", "dummy", "kick-box"]},
                                     {"params": {"typ": ["mma vybavení"]}}
                                 ],
                                 "priority": 10
@@ -638,16 +649,40 @@ class CategoryMapper:
                     "Lední hokej": {
                         "conditions": [
                             {"params": {"sport": ["hokej", "lední hokej", "ice hockey"]}},
-                            {"name_contains": ["hokej", "hockey", "brusle"]},
+                            {"name_contains": ["hokej", "hockey", "brusle", "hokejka", "kalhoty", "brankář", "dres"]},
                             {"params": {"typ": ["hokejové vybavení"]}}
                         ],
+                        "subcategories": {
+                            "Hokejky": {
+                                "conditions": [
+                                    {"name_contains": ["hokejka", "hockey stick"]},
+                                    {"params": {"typ": ["hokejka"]}}
+                                ],
+                                "priority": 10
+                            },
+                            "Hokejové brusle": {
+                                "conditions": [
+                                    {"name_contains": ["hokejové brusle", "brusle", "brankářské brusle"]},
+                                    {"params": {"typ": ["hokejové brusle", "brusle"]}}
+                                ],
+                                "priority": 10
+                            },
+                            "Hokejové oblečení": {
+                                "conditions": [
+                                    {"name_contains": ["hokejové kalhoty", "dres", "rozhodčí"]},
+                                    {"params": {"typ": ["hokejové oblečení", "dres"]}}
+                                ],
+                                "priority": 10
+                            }
+                        },
                         "priority": 8
                     },
                     "Fitness": {
                         "conditions": [
                             {"params": {"sport": ["fitness", "posilování"]}},
-                            {"name_contains": ["fitness", "posilov", "činka", "gym"]},
-                            {"params": {"typ": ["fitness vybavení"]}}
+                            {"name_contains": ["fitness", "posilov", "činka", "gym", "cyklotrenažér", "eliptick", "trenažér", "cyklotrenazer"]},
+                            {"params": {"typ": ["fitness vybavení", "fitness stroj", "kardio stroj"]}},
+                            {"brand_contains": ["nordictrack", "schwinn", "proform"]}
                         ],
                         "subcategories": {
                             "Fitness obuv": {
@@ -659,14 +694,16 @@ class CategoryMapper:
                             },
                             "Stroje": {
                                 "conditions": [
-                                    {"name_contains": ["stroj", "běžecký pás", "rotoped"]},
-                                    {"params": {"typ": ["fitness stroj", "posilovací stroj"]}}
+                                    {"name_contains": ["stroj", "běžecký pás", "rotoped", "cyklotrenažér", "eliptick", "trenažér", "schwinn", "nordictrack", "proform"]},
+                                    {"params": {"typ": ["fitness stroj", "posilovací stroj", "kardio stroj"]}},
+                                    {"brand_contains": ["nordictrack", "schwinn", "proform"]}
                                 ],
                                 "subcategories": {
                                     "Kardio stroje": {
                                         "conditions": [
-                                            {"name_contains": ["běžecký pás", "rotoped", "eliptical"]},
-                                            {"params": {"typ": ["kardio stroj"]}}
+                                            {"name_contains": ["běžecký pás", "rotoped", "eliptick", "cyklotrenažér", "trenažér", "schwinn", "nordictrack", "proform"]},
+                                            {"params": {"typ": ["kardio stroj", "fitness stroj"]}},
+                                            {"brand_contains": ["nordictrack", "schwinn", "proform"]}
                                         ],
                                         "priority": 11
                                     },
@@ -703,6 +740,38 @@ class CategoryMapper:
                         }
                     }
                 }
+            },
+            "Zimní oblečení": {
+                "conditions": [
+                    {"name_contains": ["zimní", "péřov", "vesta", "bunda", "kabát", "lyžařsk", "dívčí"]},
+                    {"params": {"sezona": ["zima", "zimní"]}},
+                    {"params": {"typ": ["zimní oblečení", "bunda", "kabát", "vesta"]}}
+                ],
+                "subcategories": {
+                    "Zimní bundy": {
+                        "conditions": [
+                            {"name_contains": ["bunda", "kabát", "parka"]},
+                            {"params": {"typ": ["bunda", "kabát", "zimní oblečení"]}}
+                        ],
+                        "priority": 10
+                    },
+                    "Péřové vesty": {
+                        "conditions": [
+                            {"name_contains": ["vesta", "péřov"]},
+                            {"params": {"typ": ["vesta", "péřová vesta"]}}
+                        ],
+                        "priority": 10
+                    },
+                    "Lyžařské oblečení": {
+                        "conditions": [
+                            {"name_contains": ["lyžařsk", "ski"]},
+                            {"params": {"sport": ["lyžování", "ski"]}},
+                            {"params": {"typ": ["lyžařské oblečení"]}}
+                        ],
+                        "priority": 10
+                    }
+                },
+                "priority": 7
             }
         }
     
@@ -1021,7 +1090,7 @@ class CategoryMapper:
             # Kontrola značky
             if 'brand_contains' in condition:
                 brand = params.get('znacka', '') or params.get('vyrobce', '')
-                if any(word in brand for word in condition['brand_contains']):
+                if any(word.lower() in brand.lower() for word in condition['brand_contains']):
                     return True
         
         return False

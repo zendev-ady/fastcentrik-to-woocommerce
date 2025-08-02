@@ -35,11 +35,11 @@ CATEGORY_MAPPING_SETTINGS = {
     },
     # Nastavení pro multi-kategorie
     "enable_multi_category": True,    # Povolit přiřazení do více kategorií
-    "max_categories_per_product": 2,  # Maximální počet kategorií na produkt
+    "max_categories_per_product": 3,  # Maximální počet kategorií na produkt (zvýšeno pro unisex produkty)
     "multi_category_separator": " | ", # Oddělovač pro více kategorií v CSV (WooCommerce standard)
     "validate_categories": True,      # Validovat existenci kategorií před přiřazením
     "multi_category_strategy": "complementary",  # Strategie: "complementary" nebo "all_matches"
-    "use_leaf_category_only": True   # Použít pouze název koncové kategorie (ne celou cestu)
+    "use_leaf_category_only": False  # Použít celou cestu kategorie pro lepší rozlišení
 }
 
 # Mapování atributů - DŮLEŽITÉ pro správné zobrazení variant
