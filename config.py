@@ -1,5 +1,6 @@
 """
 Konfigurační soubor pro FastCentrik to WooCommerce transformaci
+Verze 2.0 - s vylepšeními pro variabilní produkty a skladové zásoby
 """
 
 # Cesty k souborům
@@ -13,7 +14,7 @@ CATEGORY_MAPPING_OVERRIDES = {
     # "Pánské": "Muži",
 }
 
-# Mapování atributů
+# Mapování atributů - DŮLEŽITÉ pro správné zobrazení variant
 ATTRIBUTE_MAPPING = {
     "velikost": "Velikost",
     "barva": "Barva", 
@@ -29,7 +30,9 @@ ATTRIBUTE_MAPPING = {
     "trida_kopacek": "Třída kopaček",
     "hmotnost": "Hmotnost",
     "delka_rukavu": "Délka rukávu",
-    "strih": "Střih"
+    "strih": "Střih",
+    "vyrobce": "Výrobce",
+    "znacka": "Značka"
 }
 
 # SEO nastavení
@@ -50,25 +53,59 @@ EXPORT_SETTINGS = {
     "max_attributes_per_product": 3
 }
 
-# Nastavení variant
+# Nastavení variant - KLÍČOVÉ pro správnou funkci variabilních produktů
 VARIANT_SETTINGS = {
     "create_parent_products": True,
     "variant_attributes": ["velikost", "barva"],  # Hlavní atributy pro varianty
-    "parent_name_remove_attrs": ["velikost", "barva"]  # Atributy k odstranění z názvu parent produktu
+    "parent_name_remove_attrs": ["velikost", "barva"],  # Atributy k odstranění z názvu parent produktu
+    "inherit_parent_data": True,  # Varianty zdědí data z parent produktu
+    "sync_stock_status": True,  # Synchronizovat stock status mezi parent a variantami
+}
+
+# NOVÉ: Nastavení skladových zásob
+STOCK_SETTINGS = {
+    "enable_backorders": False,  # Povolit objednávky při vyprodání
+    "low_stock_threshold": 5,     # Práh pro nízké zásoby
+    "manage_stock_for_variations": True,  # Řídit zásoby pro varianty
+    "manage_stock_for_simple": True,      # Řídit zásoby pro jednoduché produkty
+    "default_stock_status": "instock",    # Výchozí stav skladu
+    "stock_status_mapping": {
+        0: "outofstock",
+        1: "onbackorder",  # pokud backorders povoleny
+        "default": "instock"
+    },
+    "notify_on_low_stock": True,  # Notifikace při nízkých zásobách
+    "hide_out_of_stock": False,   # Skrýt vyprodané produkty
 }
 
 # Nastavení kategorií
 CATEGORY_SETTINGS = {
     "create_hierarchy": True,
     "max_depth": 4,
-    "default_parent": ""
+    "default_parent": "",
+    "auto_create_missing": True,  # Automaticky vytvořit chybějící kategorie
+    "category_separator": " > ",  # Oddělovač pro hierarchii kategorií
 }
 
 # Nastavení tagů
 TAG_SETTINGS = {
     "auto_generate_tags": True,
-    "tag_attributes": ["pohlavi", "sport", "material"],
-    "max_tags_per_product": 5
+    "tag_attributes": ["pohlavi", "sport", "material", "znacka"],
+    "max_tags_per_product": 5,
+    "tag_separator": ", ",
+    "normalize_tags": True,  # Normalizovat tagy (malá písmena, bez diakritiky)
+}
+
+# Nastavení validace
+VALIDATION_SETTINGS = {
+    "validate_before_export": True,
+    "stop_on_errors": False,  # Zastavit při nalezení chyb
+    "max_errors_to_display": 20,
+    "validate_images": True,
+    "validate_prices": True,
+    "validate_stock": True,
+    "min_price": 0,
+    "max_price": 999999,
 }
 
 # Pokročilá nastavení
@@ -77,5 +114,26 @@ ADVANCED_SETTINGS = {
     "validate_prices": True,
     "generate_seo_automatically": True,
     "create_product_variations": True,
-    "log_level": "INFO"  # DEBUG, INFO, WARNING, ERROR
+    "log_level": "INFO",  # DEBUG, INFO, WARNING, ERROR
+    "batch_size": 1000,  # Počet produktů zpracovaných najednou
+    "memory_optimization": True,  # Optimalizace paměti pro velké soubory
+}
+
+# Nastavení pro import do WooCommerce
+WOOCOMMERCE_IMPORT_SETTINGS = {
+    "update_existing": True,  # Aktualizovat existující produkty
+    "skip_existing": False,   # Přeskočit existující produkty
+    "matching_field": "sku",  # Pole pro párování (sku, id, slug)
+    "import_images": True,
+    "download_images": False,  # Stáhnout obrázky lokálně
+    "recalculate_attributes": True,
+    "create_taxonomies": True,  # Vytvořit chybějící taxonomie
+}
+
+# Debug nastavení
+DEBUG_SETTINGS = {
+    "save_intermediate_files": False,  # Ukládat mezivýsledky
+    "print_product_structure": True,   # Vypsat strukturu produktů
+    "export_validation_report": True,  # Exportovat validační report
+    "sample_size": 10,  # Počet produktů pro debug výpis
 }

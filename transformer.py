@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FastCentrik to WooCommerce CSV Transformer
-==========================================
+FastCentrik to WooCommerce CSV Transformer - Vylepšená verze
+============================================================
 
 Transformuje data z FastCentrik platformy do WooCommerce kompatibilního CSV formátu.
 Podporuje variabilní produkty, kategorie, atributy a SEO optimalizaci.
 
 Autor: FastCentrik Migration Tool
-Verze: 1.0
+Verze: 2.0
 """
 
 import pandas as pd
 import re
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 import logging
 from utils import create_slug, parse_parameters
 from config import (
     SEO_SETTINGS,
     TAG_SETTINGS,
     VARIANT_SETTINGS,
-    IMAGE_BASE_URL
+    IMAGE_BASE_URL,
+    ATTRIBUTE_MAPPING,
+    STOCK_SETTINGS
 )
 
 # Nastavení logování
@@ -45,6 +47,8 @@ class DataTransformer:
         self.category_mapping = {}
         self.woo_products = []
         self.woo_categories = []
+        self.validation_errors = []  # NOVÉ
+        self.validation_errors = []
     
     def _create_category_mapping(self) -> None:
         """Vytvoří mapování kategorií s hierarchickou strukturou."""
@@ -61,7 +65,6 @@ class DataTransformer:
                 }
         
         logger.info(f"Vytvořeno mapování pro {len(self.category_mapping)} kategorií")
-    
     
     def _get_category_path(self, category_id: str) -> str:
         """Získá hierarchickou cestu kategorie."""
@@ -119,6 +122,142 @@ class DataTransformer:
         
         return ', '.join(images)
     
+    def _get_stock_data(self, row: pd.Series, product_type: str = 'simple') -> Dict:
+        """Vrátí kompletní data o skladových zásobách"""
+        stock_quantity = row.get('NaSklade', 0)
+        
+        # Základní stock data
+        stock_data = {
+            'In stock?': '1' if stock_quantity > 0 else '0',
+            'Stock': str(stock_quantity) if product_type != 'variable' else '',
+            'Low stock amount': str(STOCK_SETTINGS.get('low_stock_threshold', 5)),
+            'Backorders allowed?': '1' if STOCK_SETTINGS.get('enable_backorders', False) else '0',
+            'Manage stock?': '1' if product_type != 'variable' else ''
+        }
+        
+        # Pro varianty přidat stock status
+        if product_type == 'variation':
+            if stock_quantity <= 0 and STOCK_SETTINGS.get('enable_backorders', False):
+                stock_data['Stock status'] = 'onbackorder'
+            elif stock_quantity <= 0:
+                stock_data['Stock status'] = 'outofstock'
+            else:
+                stock_data['Stock status'] = 'instock'
+        
+        return stock_data
+    
+    def _create_parent_attributes(self, variants_group: pd.DataFrame) -> Dict:
+        """Vytvoří souhrnné atributy pro parent produkt ze všech variant"""
+        all_attributes = {}
+        
+        # Shromáždíme všechny unikátní hodnoty atributů ze všech variant
+        for _, variant in variants_group.iterrows():
+            params = parse_parameters(variant.get('HodnotyParametru', ''))
+            
+            for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
+                if attr_name in params:
+                    if attr_name not in all_attributes:
+                        all_attributes[attr_name] = set()
+                    all_attributes[attr_name].add(params[attr_name])
+        
+        # Převod na WooCommerce formát
+        woo_attributes = {}
+        attr_counter = 1
+        
+        for attr_name, values in all_attributes.items():
+            mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
+            woo_attributes[f'Attribute {attr_counter} name'] = mapped_name
+            woo_attributes[f'Attribute {attr_counter} value(s)'] = ', '.join(sorted(values))
+            woo_attributes[f'Attribute {attr_counter} visible'] = '1'
+            woo_attributes[f'Attribute {attr_counter} global'] = '1'
+            attr_counter += 1
+        
+        return woo_attributes
+    
+    def _calculate_parent_stock(self, variants_group: pd.DataFrame) -> Tuple[str, str]:
+        """Vypočítá skladové zásoby pro parent produkt"""
+        any_in_stock = False
+        
+        for _, variant in variants_group.iterrows():
+            variant_stock = variant.get('NaSklade', 0)
+            if variant_stock > 0:
+                any_in_stock = True
+                break
+        
+        # WooCommerce parent produkty nemají vlastní stock
+        in_stock = '1' if any_in_stock else '0'
+        stock_quantity = ''  # Vždy prázdné pro variable produkty
+        
+        return in_stock, stock_quantity
+    
+    def _get_stock_data(self, row: pd.Series, product_type: str = 'simple') -> Dict:
+        """Vrátí kompletní data o skladových zásobách"""
+        stock_quantity = row.get('NaSklade', 0)
+        
+        # Základní stock data
+        stock_data = {
+            'In stock?': '1' if stock_quantity > 0 else '0',
+            'Stock': str(stock_quantity) if product_type != 'variable' else '',
+            'Low stock amount': str(STOCK_SETTINGS.get('low_stock_threshold', 5)),
+            'Backorders allowed?': '1' if STOCK_SETTINGS.get('enable_backorders', False) else '0',
+            'Manage stock?': '1' if product_type != 'variable' else ''
+        }
+        
+        # Pro varianty přidat stock status
+        if product_type == 'variation':
+            if stock_quantity <= 0 and STOCK_SETTINGS.get('enable_backorders', False):
+                stock_data['Stock status'] = 'onbackorder'
+            elif stock_quantity <= 0:
+                stock_data['Stock status'] = 'outofstock'
+            else:
+                stock_data['Stock status'] = 'instock'
+        
+        return stock_data
+    
+    def _create_parent_attributes(self, variants_group: pd.DataFrame) -> Dict:
+        """Vytvoří souhrnné atributy pro parent produkt ze všech variant"""
+        all_attributes = {}
+        
+        # Shromáždíme všechny unikátní hodnoty atributů ze všech variant
+        for _, variant in variants_group.iterrows():
+            params = parse_parameters(variant.get('HodnotyParametru', ''))
+            
+            for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
+                if attr_name in params:
+                    if attr_name not in all_attributes:
+                        all_attributes[attr_name] = set()
+                    all_attributes[attr_name].add(params[attr_name])
+        
+        # Převod na WooCommerce formát
+        woo_attributes = {}
+        attr_counter = 1
+        
+        for attr_name, values in all_attributes.items():
+            mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
+            woo_attributes[f'Attribute {attr_counter} name'] = mapped_name
+            woo_attributes[f'Attribute {attr_counter} value(s)'] = ', '.join(sorted(values))
+            woo_attributes[f'Attribute {attr_counter} visible'] = '1'
+            woo_attributes[f'Attribute {attr_counter} global'] = '1'
+            attr_counter += 1
+        
+        return woo_attributes
+    
+    def _calculate_parent_stock(self, variants_group: pd.DataFrame) -> Tuple[str, str]:
+        """Vypočítá skladové zásoby pro parent produkt"""
+        any_in_stock = False
+        
+        for _, variant in variants_group.iterrows():
+            variant_stock = variant.get('NaSklade', 0)
+            if variant_stock > 0:
+                any_in_stock = True
+                break
+        
+        # WooCommerce parent produkty nemají vlastní stock
+        in_stock = '1' if any_in_stock else '0'
+        stock_quantity = ''  # Vždy prázdné pro variable produkty
+        
+        return in_stock, stock_quantity
+    
     def _create_woo_product(self, row: pd.Series, product_type: str = 'simple', parent_sku: str = '') -> Dict:
         """Vytvoří WooCommerce produkt ze záznamu."""
         params = parse_parameters(row.get('HodnotyParametru', ''))
@@ -146,19 +285,34 @@ class DataTransformer:
         # Obrázky
         images = self._get_product_images(row.get('HlavniObrazek'), row.get('DalsiObrazky'))
         
+        # Skladové zásoby
+        stock_data = self._get_stock_data(row, product_type)
+        
         # Atributy
         attributes = {}
-        attr_counter = 1
-        
-        # Přidání hlavních atributů
-        for attr_name, attr_value in params.items():
-            if attr_counter > 3:
-                break
-            attributes[f'Attribute {attr_counter} name'] = attr_name.title()
-            attributes[f'Attribute {attr_counter} value(s)'] = attr_value
-            attributes[f'Attribute {attr_counter} visible'] = '1'
-            attributes[f'Attribute {attr_counter} global'] = '1'
-            attr_counter += 1
+        if product_type == 'variation':
+            # Pro varianty přidáme pouze atributy, které jsou variant attributes
+            attr_counter = 1
+            for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
+                if attr_name in params:
+                    mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
+                    attributes[f'Attribute {attr_counter} name'] = mapped_name
+                    attributes[f'Attribute {attr_counter} value(s)'] = params[attr_name]
+                    attributes[f'Attribute {attr_counter} visible'] = '1'
+                    attributes[f'Attribute {attr_counter} global'] = '1'
+                    attr_counter += 1
+        elif product_type == 'simple':
+            # Pro jednoduché produkty přidáme všechny atributy
+            attr_counter = 1
+            for attr_name, attr_value in params.items():
+                if attr_counter > 3:
+                    break
+                mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
+                attributes[f'Attribute {attr_counter} name'] = mapped_name
+                attributes[f'Attribute {attr_counter} value(s)'] = attr_value
+                attributes[f'Attribute {attr_counter} visible'] = '1'
+                attributes[f'Attribute {attr_counter} global'] = '1'
+                attr_counter += 1
 
         # Tagy
         tags = []
@@ -184,10 +338,10 @@ class DataTransformer:
             'Date sale price ends': '',
             'Tax status': 'taxable',
             'Tax class': '',
-            'In stock?': '1' if row.get('NaSklade', 0) > 0 else '0',
-            'Stock': str(row.get('NaSklade', 0)),
-            'Low stock amount': '',
-            'Backorders allowed?': '0',
+            'In stock?': stock_data['In stock?'],
+            'Stock': stock_data['Stock'],
+            'Low stock amount': stock_data['Low stock amount'],
+            'Backorders allowed?': stock_data['Backorders allowed?'],
             'Sold individually?': '0',
             'Weight (kg)': str(row.get('Hmotnost', '')).replace(',', '.'),
             'Length (cm)': '',
@@ -218,23 +372,12 @@ class DataTransformer:
         # Přidání atributů
         woo_product.update(attributes)
         
+        # Přidání stock status pro varianty
+        if product_type == 'variation' and 'Stock status' in stock_data:
+            woo_product['Stock status'] = stock_data['Stock status']
+        
         return woo_product
     
-    def run_transformation(self) -> Tuple[List[Dict], List[Dict]]:
-        """
-        Spustí kompletní transformaci dat a vrátí produkty a kategorie.
-
-        Returns:
-            Tuple[List[Dict], List[Dict]]: Dvojice obsahující seznam produktů a seznam kategorií.
-        """
-        logger.info("=== SPUŠTĚNÍ TRANSFORMACE DAT ===")
-        self._create_category_mapping()
-        self._transform_products()
-        self._transform_categories()
-        self._print_transformation_stats()
-        logger.info("=== TRANSFORMACE DAT DOKONČENA ===")
-        return self.woo_products, self.woo_categories
-
     def _transform_products(self) -> None:
         """Hlavní metoda pro transformaci produktů."""
         logger.info("Zahajuji transformaci produktů")
@@ -263,9 +406,19 @@ class DataTransformer:
             main_product = group.iloc[0].copy()
             main_product['JmenoZbozi'] = self._create_parent_name(group)
             
+            # Vytvoření parent produktu
             parent_product = self._create_woo_product(main_product, 'variable')
             parent_product['SKU'] = f"{master_code}_parent"
-            parent_product['Stock'] = ''  # Variabilní produkty nemají stock
+            
+            # Přidání souhrnných atributů
+            parent_attributes = self._create_parent_attributes(group)
+            parent_product.update(parent_attributes)
+            
+            # Výpočet skladových zásob
+            in_stock, stock = self._calculate_parent_stock(group)
+            parent_product['In stock?'] = in_stock
+            parent_product['Stock'] = stock
+            parent_product['Manage stock?'] = ''  # Variable produkty neřídí stock přímo
             
             self.woo_products.append(parent_product)
             
@@ -275,6 +428,12 @@ class DataTransformer:
                 self.woo_products.append(variant_product)
         
         logger.info(f"Vytvořeno celkem {len(self.woo_products)} WooCommerce produktů")
+        
+        # Debug výstup pokud je povoleno
+        self._debug_product_structure()
+        
+        # Debug výstup pokud je povoleno
+        self._debug_product_structure()
 
     def _create_parent_name(self, variants_group: pd.DataFrame) -> str:
         """Vytvoří název pro hlavní variabilní produkt na základě configu."""
@@ -311,6 +470,169 @@ class DataTransformer:
                 self.woo_categories.append(category)
         logger.info(f"Zpracováno {len(self.woo_categories)} kategorií.")
     
+    def _debug_product_structure(self):
+        """Vypíše debug informace o struktuře produktů"""
+        if logging.getLogger().level == logging.DEBUG:
+            print("\n=== DEBUG: Struktura produktů ===")
+            
+            variable_products = [p for p in self.woo_products if p['Type'] == 'variable']
+            print(f"Variable produkty: {len(variable_products)}")
+            
+            for vp in variable_products[:5]:  # Omezit na prvních 5 pro přehlednost
+                print(f"\nParent: {vp['SKU']}")
+                print(f"  Název: {vp['Name']}")
+                print(f"  Stock: {vp['Stock']} (měl by být prázdný)")
+                print(f"  In stock?: {vp['In stock?']}")
+                
+                # Vypsat atributy
+                attrs = []
+                for i in range(1, 4):
+                    attr_name = vp.get(f'Attribute {i} name')
+                    attr_values = vp.get(f'Attribute {i} value(s)')
+                    if attr_name:
+                        attrs.append(f"{attr_name}: {attr_values}")
+                print(f"  Atributy: {', '.join(attrs)}")
+                
+                # Najít varianty
+                variants = [p for p in self.woo_products if p['Type'] == 'variation' and p['Parent'] == vp['SKU']]
+                print(f"  Počet variant: {len(variants)}")
+                for v in variants[:3]:  # Zobrazit max 3 varianty
+                    print(f"    - {v['SKU']}: Stock={v['Stock']}, In stock={v['In stock?']}")
+    
+    def validate_products(self) -> List[str]:
+        """Validuje vytvořené produkty před exportem"""
+        errors = []
+        parent_skus = set()
+        
+        # Najít všechny parent produkty
+        for product in self.woo_products:
+            if product['Type'] == 'variable':
+                parent_skus.add(product['SKU'])
+        
+        # Zkontrolovat varianty
+        for product in self.woo_products:
+            if product['Type'] == 'variation':
+                if product['Parent'] not in parent_skus:
+                    errors.append(f"Varianta {product['SKU']} nemá parent produkt {product['Parent']}")
+                
+                # Kontrola atributů
+                has_attributes = any(
+                    product.get(f'Attribute {i} name') 
+                    for i in range(1, 4)
+                )
+                if not has_attributes:
+                    errors.append(f"Varianta {product['SKU']} nemá žádné atributy")
+        
+        # Kontrola parent produktů
+        for product in self.woo_products:
+            if product['Type'] == 'variable':
+                # Musí mít atributy
+                has_attributes = any(
+                    product.get(f'Attribute {i} name') 
+                    for i in range(1, 4)
+                )
+                if not has_attributes:
+                    errors.append(f"Parent produkt {product['SKU']} nemá žádné atributy")
+                
+                # Neměl by mít stock
+                if product.get('Stock'):
+                    errors.append(f"Variable produkt {product['SKU']} má vyplněný stock: {product['Stock']}")
+        
+        return errors
+    
+    def _debug_product_structure(self):
+        """Vypíše debug informace o struktuře produktů"""
+        if logging.getLogger().level == logging.DEBUG:
+            print("\n=== DEBUG: Struktura produktů ===")
+            
+            variable_products = [p for p in self.woo_products if p['Type'] == 'variable']
+            print(f"Variable produkty: {len(variable_products)}")
+            
+            for vp in variable_products[:5]:  # Omezit na prvních 5 pro přehlednost
+                print(f"\nParent: {vp['SKU']}")
+                print(f"  Název: {vp['Name']}")
+                print(f"  Stock: {vp['Stock']} (měl by být prázdný)")
+                print(f"  In stock?: {vp['In stock?']}")
+                
+                # Vypsat atributy
+                attrs = []
+                for i in range(1, 4):
+                    attr_name = vp.get(f'Attribute {i} name')
+                    attr_values = vp.get(f'Attribute {i} value(s)')
+                    if attr_name:
+                        attrs.append(f"{attr_name}: {attr_values}")
+                print(f"  Atributy: {', '.join(attrs)}")
+                
+                # Najít varianty
+                variants = [p for p in self.woo_products if p['Type'] == 'variation' and p['Parent'] == vp['SKU']]
+                print(f"  Počet variant: {len(variants)}")
+                for v in variants[:3]:  # Zobrazit max 3 varianty
+                    print(f"    - {v['SKU']}: Stock={v['Stock']}, In stock={v['In stock?']}")
+    
+    def validate_products(self) -> List[str]:
+        """Validuje vytvořené produkty před exportem"""
+        errors = []
+        parent_skus = set()
+        
+        # Najít všechny parent produkty
+        for product in self.woo_products:
+            if product['Type'] == 'variable':
+                parent_skus.add(product['SKU'])
+        
+        # Zkontrolovat varianty
+        for product in self.woo_products:
+            if product['Type'] == 'variation':
+                if product['Parent'] not in parent_skus:
+                    errors.append(f"Varianta {product['SKU']} nemá parent produkt {product['Parent']}")
+                
+                # Kontrola atributů
+                has_attributes = any(
+                    product.get(f'Attribute {i} name') 
+                    for i in range(1, 4)
+                )
+                if not has_attributes:
+                    errors.append(f"Varianta {product['SKU']} nemá žádné atributy")
+        
+        # Kontrola parent produktů
+        for product in self.woo_products:
+            if product['Type'] == 'variable':
+                # Musí mít atributy
+                has_attributes = any(
+                    product.get(f'Attribute {i} name') 
+                    for i in range(1, 4)
+                )
+                if not has_attributes:
+                    errors.append(f"Parent produkt {product['SKU']} nemá žádné atributy")
+                
+                # Neměl by mít stock
+                if product.get('Stock'):
+                    errors.append(f"Variable produkt {product['SKU']} má vyplněný stock: {product['Stock']}")
+        
+        return errors
+    
+    def run_transformation(self) -> Tuple[List[Dict], List[Dict]]:
+        """
+        Spustí kompletní transformaci dat a vrátí produkty a kategorie.
+
+        Returns:
+            Tuple[List[Dict], List[Dict]]: Dvojice obsahující seznam produktů a seznam kategorií.
+        """
+        logger.info("=== SPUŠTĚNÍ TRANSFORMACE DAT ===")
+        self._create_category_mapping()
+        self._transform_products()
+        self._transform_categories()
+        
+        # Validace
+        validation_errors = self.validate_products()
+        if validation_errors:
+            logger.warning(f"Nalezeno {len(validation_errors)} validačních chyb:")
+            for error in validation_errors[:10]:  # Zobrazit max 10 chyb
+                logger.warning(f"  - {error}")
+        
+        self._print_transformation_stats()
+        logger.info("=== TRANSFORMACE DAT DOKONČENA ===")
+        return self.woo_products, self.woo_categories
+    
     def _print_transformation_stats(self) -> None:
         """Vypíše statistiky transformace."""
         simple_count = len([p for p in self.woo_products if p['Type'] == 'simple'])
@@ -326,5 +648,6 @@ class DataTransformer:
         print(f"  - Variabilní produkty: {variable_count}")
         print(f"  - Varianty: {variation_count}")
         print(f"Celkem kategorií: {len(self.category_mapping)}")
+        if self.validation_errors:
+            print(f"⚠️  Validační chyby: {len(self.validation_errors)}")
         print("="*50)
-
