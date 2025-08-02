@@ -2,121 +2,157 @@
 
 🚀 Nástroj pro převod dat z FastCentrik exportu do formátu kompatibilního s WooCommerce.
 
-## 📋 Co budete potřebovat
+## 📋 Požadavky
 
-### 1. Instalace Dockeru (Ubuntu/Debian)
+- Python 3.8 nebo vyšší
+- pip (správce balíčků pro Python)
 
-```bash
-# Aktualizace systému
-sudo apt update
+## 📁 Struktura projektu
 
-# Instalace závislostí
-sudo apt install apt-transport-https ca-certificates curl software-properties-common
-
-# Přidání Docker GPG klíče
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-
-# Přidání Docker repository
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# Instalace Dockeru
-sudo apt update
-sudo apt install docker-ce docker-ce-cli containerd.io
-
-# Přidání uživatele do docker skupiny (aby nebylo potřeba sudo)
-sudo usermod -aG docker $USER
-
-# Restart systému nebo odhlášení/přihlášení
+```
+fastcentrik-to-woocommerce/
+├── src/
+│   └── fastcentrik_woocommerce/
+│       ├── core/           # Hlavní transformační logika
+│       ├── exporters/      # CSV exportéry
+│       ├── loaders/        # Načítání dat
+│       ├── mappers/        # Mapování kategorií
+│       ├── utils/          # Pomocné funkce
+│       └── validators/     # Validátory dat
+├── tests/
+│   ├── unit/              # Unit testy
+│   └── integration/       # Integrační testy
+├── config/                # Konfigurační soubory
+├── docs/                  # Dokumentace
+├── scripts/               # Pomocné skripty
+├── woocommerce_output/    # Výstupní soubory
+└── requirements.txt       # Python závislosti
 ```
 
-### 2. Instalace Docker Compose
+## 🚀 Instalace
+
+### 1. Klonování repozitáře
 
 ```bash
-# Stažení Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-
-# Nastavení práv
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Ověření instalace
-docker-compose --version
-```
-
-### 3. Pro ostatní Linux distribuce
-
-**CentOS/RHEL/Fedora:**
-```bash
-# Instalace Dockeru
-sudo dnf install docker docker-compose
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker $USER
-```
-
-**Arch Linux:**
-```bash
-# Instalace Dockeru
-sudo pacman -S docker docker-compose
-sudo systemctl start docker
-sudo systemctl enable docker
-sudo usermod -aG docker $USER
-```
-
-## 🚀 Spuštění projektu
-
-### Krok 1: Stažení projektu
-```bash
-# Pokud máte git
 git clone <URL_VAŠEHO_REPOZITÁŘE>
 cd fastcentrik-to-woocommerce
-
-# Nebo si stáhněte ZIP a rozbalte
 ```
 
-### Krok 2: Příprava vstupních dat
+### 2. Instalace závislostí
+
 ```bash
-# Umístěte váš Excel soubor z FastCentrik do složky projektu
+pip install -r requirements.txt
+```
+
+Nebo použijte instalační skript:
+
+```bash
+python scripts/install_dependencies.py
+```
+
+## ✨ Funkce
+
+### Inteligentní mapování kategorií
+Systém automaticky přiřazuje produkty do správných WooCommerce kategorií na základě:
+- Pohlaví (muži, ženy, děti)
+- Typu produktu (oblečení, boty, doplňky)
+- Sportu (fotbal, tenis, běh, atd.)
+- Dalších atributů produktu
+
+### Multi-Category systém
+Produkty mohou být přiřazeny do více kategorií současně:
+- **Výchozí limit**: 2 kategorie na produkt
+- **Komplementární strategie**: výběr kategorií z různých větví
+- **Plně konfigurovatelné** limity a strategie
+- **Zpětná kompatibilita** se single-category systémem
+
+**Příklad**: Pánské běžecké tričko může být zařazeno do:
+1. Muži > Pánské oblečení > Pánská trička
+2. Sporty > Běh > Běžecké oblečení
+
+## 📊 Použití
+
+### Základní transformace
+
+```bash
+# Umístěte váš Excel soubor z FastCentrik do kořenové složky projektu
 # Soubor musí být pojmenován: Export_Excel_Lite.xls
-cp /cesta/k/vašemu/souboru.xls ./Export_Excel_Lite.xls
+
+# Spusťte transformaci
+python run_transformation.py
 ```
 
-### Krok 3: Spuštění transformace
+### Pokročilé možnosti
 
-**Možnost A - Pomocí skriptu (doporučeno):**
 ```bash
-# Nastavení práv pro skript
-chmod +x run.sh
+# Vlastní vstupní soubor
+python run_transformation.py --input muj_soubor.xls
 
-# Spuštění
-./run.sh
+# Vlastní výstupní složka
+python run_transformation.py --output ./moje_vystupy/
+
+# Debug režim
+python run_transformation.py --log-level DEBUG
+
+# Pouze validace
+python run_transformation.py --validate-only
 ```
 
-**Možnost B - Manuálně pomocí Docker Compose:**
+### Dávkové zpracování
+
+Pro zpracování více souborů najednou:
+
 ```bash
-# Build Docker image
-docker-compose build
-
-# Spuštění transformace
-docker-compose --profile transform up transform
-
-# Vyčištění po dokončení
-docker-compose --profile transform down
+python scripts/batch_transform.py /cesta/ke/slozce/s/excel/soubory --output ./batch_output/
 ```
 
-**Možnost C - Přímé použití Dockeru:**
+## 🧪 Testování
+
+### Spuštění testů
+
 ```bash
-# Build image
-docker build -t fastcentrik-transformer .
+# Test multi-category systému
+python tests/unit/test_multi_category.py
 
-# Spuštění s mapováním souborů
-docker run --rm \
-  -v $(pwd)/Export_Excel_Lite.xls:/app/Export_Excel_Lite.xls:ro \
-  -v $(pwd)/woocommerce_output:/app/woocommerce_output \
-  -v $(pwd)/transformation.log:/app/transformation.log \
-  fastcentrik-transformer python run_transformation.py
+# Test leaf categories
+python tests/unit/test_leaf_categories.py
+
+# Validace kategorií
+python validate_categories.py
 ```
 
-## 📁 Výsledky
+## ⚙️ Konfigurace
+
+Upravte soubor `config/config.py` pro:
+
+### Multi-category nastavení
+```python
+CATEGORY_MAPPING_SETTINGS = {
+    "enable_multi_category": True,
+    "max_categories_per_product": 2,
+    "multi_category_strategy": "complementary",
+    "multi_category_separator": " | ",
+    "use_leaf_category_only": True
+}
+```
+
+### SEO nastavení
+```python
+SEO_SETTINGS = {
+    "title_suffix": " | Váš SportShop",
+    "meta_desc_template": "Kvalitní {product_name} v kategorii {category}",
+    "focus_keyword_words": 3
+}
+```
+
+### Další nastavení
+- Mapování kategorií
+- URL obrázků
+- Nastavení variant produktů
+- Skladové zásoby
+- Atributy a tagy
+
+## 📁 Výstupní soubory
 
 Po úspěšném dokončení najdete ve složce `woocommerce_output/`:
 
@@ -137,65 +173,23 @@ Po úspěšném dokončení najdete ve složce `woocommerce_output/`:
 4. Namapujte sloupce podle potřeby
 5. Spusťte import
 
-## ⚙️ Pokročilé možnosti
-
-### Vlastní vstupní soubor
-```bash
-# Spuštění s vlastním souborem
-docker run --rm \
-  -v $(pwd)/muj_soubor.xls:/app/Export_Excel_Lite.xls:ro \
-  -v $(pwd)/woocommerce_output:/app/woocommerce_output \
-  fastcentrik-transformer python run_transformation.py
-```
-
-### Vlastní výstupní složka
-```bash
-# Spuštění s vlastní výstupní složkou
-docker run --rm \
-  -v $(pwd)/Export_Excel_Lite.xls:/app/Export_Excel_Lite.xls:ro \
-  -v $(pwd)/moje_vystupy:/app/woocommerce_output \
-  fastcentrik-transformer python run_transformation.py --output /app/woocommerce_output
-```
-
-### Debug režim
-```bash
-# Spuštění s debug logováním
-docker run --rm \
-  -v $(pwd)/Export_Excel_Lite.xls:/app/Export_Excel_Lite.xls:ro \
-  -v $(pwd)/woocommerce_output:/app/woocommerce_output \
-  -v $(pwd)/transformation.log:/app/transformation.log \
-  fastcentrik-transformer python run_transformation.py --log-level DEBUG
-```
-
-## 🔧 Konfigurace
-
-Upravte soubor `config.py` pro:
-- Mapování kategorií
-- SEO nastavení
-- URL obrázků
-- Nastavení variant produktů
-
 ## 📝 Logování
 
 Všechny operace jsou logovány do souboru `transformation.log`. V případě problémů zkontrolujte tento soubor.
 
 ## ❗ Řešení problémů
 
-### Docker není nainstalován
+### Python není nainstalován
 ```bash
 # Ověření instalace
-docker --version
-docker-compose --version
-
-# Pokud příkazy nefungují, Docker není správně nainstalován
+python --version
+python3 --version
 ```
 
-### Chyba oprávnění
+### Chybí závislosti
 ```bash
-# Přidání uživatele do docker skupiny
-sudo usermod -aG docker $USER
-
-# Odhlášení a přihlášení nebo restart
+# Reinstalace závislostí
+pip install -r requirements.txt --force-reinstall
 ```
 
 ### Soubor neexistuje
@@ -204,13 +198,23 @@ sudo usermod -aG docker $USER
 ls -la Export_Excel_Lite.xls
 ```
 
-### Chyba při buildu
-```bash
-# Vyčištění Docker cache
-docker system prune -a
+## 📚 Dokumentace
 
-# Nový build
-docker-compose build --no-cache
+- [Multi-Category dokumentace](docs/MULTI_CATEGORY_DOCUMENTATION.md) - Podrobný návod k multi-category systému
+- [Konfigurace](config/config.py) - Všechna nastavení transformace
+
+## 🎯 Rychlý start
+
+```bash
+# 1. Nainstalujte závislosti
+pip install -r requirements.txt
+
+# 2. Umístěte Excel soubor jako Export_Excel_Lite.xls
+
+# 3. Spusťte transformaci
+python run_transformation.py
+
+# 4. Výsledky najdete ve složce woocommerce_output/
 ```
 
 ## 📞 Podpora
@@ -218,14 +222,18 @@ docker-compose build --no-cache
 V případě problémů:
 1. Zkontrolujte log soubor `transformation.log`
 2. Ověřte, že máte správný formát vstupního Excel souboru
-3. Zkontrolujte Docker logy: `docker-compose logs`
+3. Pro problémy s kategoriemi spusťte: `python validate_categories.py`
+4. Zkontrolujte [dokumentaci](docs/)
 
-## 🎯 Rychlý start (TL;DR)
+## 🤝 Přispívání
 
-```bash
-# 1. Nainstalujte Docker a Docker Compose
-# 2. Stáhněte projekt
-# 3. Umístěte Excel soubor jako Export_Excel_Lite.xls
-# 4. Spusťte:
-chmod +x run.sh && ./run.sh
-# 5. Výsledky najdete ve složce woocommerce_output/
+Příspěvky jsou vítány! Prosím:
+1. Forkněte repozitář
+2. Vytvořte feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commitněte změny (`git commit -m 'Add some AmazingFeature'`)
+4. Pushněte do branch (`git push origin feature/AmazingFeature`)
+5. Otevřete Pull Request
+
+## 📄 Licence
+
+Tento projekt je licencován pod MIT licencí.

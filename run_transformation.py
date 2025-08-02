@@ -1,7 +1,3 @@
-# ============================================================================
-# run_transformation.py - Spouštěcí skript
-# ============================================================================
-
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -16,10 +12,14 @@ import argparse
 import sys
 from pathlib import Path
 import logging
-from config import INPUT_EXCEL_FILE, OUTPUT_DIRECTORY, ADVANCED_SETTINGS
-from data_loader import DataLoader
-from transformer import DataTransformer
-from csv_exporter import CsvExporter
+
+# Add the src directory to the Python path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from config.config import INPUT_EXCEL_FILE, OUTPUT_DIRECTORY, ADVANCED_SETTINGS
+from src.fastcentrik_woocommerce.loaders.data_loader import DataLoader
+from src.fastcentrik_woocommerce.core.transformer import DataTransformer
+from src.fastcentrik_woocommerce.exporters.csv_exporter import CsvExporter
 
 def setup_logging(level: str = "INFO"):
     """Nastavení logování"""
