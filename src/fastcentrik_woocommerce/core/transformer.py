@@ -133,7 +133,7 @@ class DataTransformer:
                     additional.append(f"{base_url}/{image_path}")
             images.extend(additional)
         
-        return ', '.join(images)
+        return '|'.join(images)
     
     def _get_stock_data(self, row: pd.Series, product_type: str = 'simple') -> Dict:
         """Vrátí kompletní data o skladových zásobách"""
