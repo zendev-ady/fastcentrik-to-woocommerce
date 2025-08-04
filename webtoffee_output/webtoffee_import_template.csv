@@ -1,0 +1,5 @@
+﻿ID,post_parent,sku,post_title,post_excerpt,post_content,post_status,regular_price,sale_price,stock_status,stock,manage_stock,weight,length,width,height,images,tax:product_type,tax:product_cat,tax:product_tag,visibility,featured,downloadable,virtual,backorders,sold_individually,low_stock_amount,reviews_allowed,purchase_note,menu_order,tax_status,tax_class,shipping_class,attribute:pa_color,attribute_data:pa_color,attribute_default:pa_color,meta:attribute_pa_color,attribute:pa_size,attribute_data:pa_size,attribute_default:pa_size,meta:attribute_pa_size
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,0|1|1,,,,1|1|1,,
+1001,,EXAMPLE-001,Example Simple Product,,,publish,100,,,50,yes,,,,,,Simple,Category 1 > Subcategory,,visible,,no,no,no,,,,,0,,,,,,,,,,,
+1002,,EXAMPLE-VAR,Example Variable Product,,,publish,150,,,,yes,,,,,,Variable,,,visible,,no,no,no,,,,,0,,,,Red|Blue|Green,0|1|1,Red,,S|M|L,1|1|1,M,
+1003,1002,EXAMPLE-VAR-RED-S,,,,publish,150,,,10,yes,,,,,,,,,visible,,no,no,no,,,,,0,,,,,,,Red,,,,S
