@@ -167,6 +167,15 @@ class DataTransformer:
         for _, variant in variants_group.iterrows():
             params = parse_parameters(variant.get('HodnotyParametru', ''))
             
+            # Pokud jsou parametry prázdné, zkusíme extrahovat velikost z názvu
+            if not params and 'JmenoZbozi' in variant:
+                name = str(variant['JmenoZbozi'])
+                # Zkusíme najít velikost v názvu (např. "39 1/3", "40", "41 1/3")
+                import re
+                size_match = re.search(r'\b(\d{2}(?:\s+\d/\d)?)\b$', name)
+                if size_match:
+                    params['velikost'] = size_match.group(1)
+            
             for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
                 if attr_name in params:
                     if attr_name not in all_attributes:
@@ -227,49 +236,6 @@ class DataTransformer:
         
         return stock_data
     
-    def _create_parent_attributes(self, variants_group: pd.DataFrame) -> Dict:
-        """Vytvoří souhrnné atributy pro parent produkt ze všech variant"""
-        all_attributes = {}
-        
-        # Shromáždíme všechny unikátní hodnoty atributů ze všech variant
-        for _, variant in variants_group.iterrows():
-            params = parse_parameters(variant.get('HodnotyParametru', ''))
-            
-            for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
-                if attr_name in params:
-                    if attr_name not in all_attributes:
-                        all_attributes[attr_name] = set()
-                    all_attributes[attr_name].add(params[attr_name])
-        
-        # Převod na WooCommerce formát
-        woo_attributes = {}
-        attr_counter = 1
-        
-        for attr_name, values in all_attributes.items():
-            mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
-            woo_attributes[f'Attribute {attr_counter} name'] = mapped_name
-            woo_attributes[f'Attribute {attr_counter} value(s)'] = ', '.join(sorted(values))
-            woo_attributes[f'Attribute {attr_counter} visible'] = '1'
-            woo_attributes[f'Attribute {attr_counter} global'] = '1'
-            attr_counter += 1
-        
-        return woo_attributes
-    
-    def _calculate_parent_stock(self, variants_group: pd.DataFrame) -> Tuple[str, str]:
-        """Vypočítá skladové zásoby pro parent produkt"""
-        any_in_stock = False
-        
-        for _, variant in variants_group.iterrows():
-            variant_stock = variant.get('NaSklade', 0)
-            if variant_stock > 0:
-                any_in_stock = True
-                break
-        
-        # WooCommerce parent produkty nemají vlastní stock
-        in_stock = '1' if any_in_stock else '0'
-        stock_quantity = ''  # Vždy prázdné pro variable produkty
-        
-        return in_stock, stock_quantity
     
     def _create_woo_product(self, row: pd.Series, product_type: str = 'simple', parent_sku: str = '') -> Dict:
         """Vytvoří WooCommerce produkt ze záznamu."""
@@ -354,6 +320,16 @@ class DataTransformer:
         if product_type == 'variation':
             # Pro varianty přidáme pouze atributy, které jsou variant attributes
             attr_counter = 1
+            
+            # Pokud jsou parametry prázdné, zkusíme extrahovat velikost z názvu
+            if not params and 'JmenoZbozi' in row:
+                name = str(row['JmenoZbozi'])
+                # Zkusíme najít velikost v názvu (např. "39 1/3", "40", "41 1/3")
+                import re
+                size_match = re.search(r'\b(\d{2}(?:\s+\d/\d)?)\b$', name)
+                if size_match:
+                    params['velikost'] = size_match.group(1)
+            
             for attr_name in VARIANT_SETTINGS.get('variant_attributes', ['velikost', 'barva']):
                 if attr_name in params:
                     mapped_name = ATTRIBUTE_MAPPING.get(attr_name, attr_name.title())
@@ -443,58 +419,136 @@ class DataTransformer:
         """Hlavní metoda pro transformaci produktů."""
         logger.info("Zahajuji transformaci produktů")
         
-        # Seskupení produktů podle master kódu
-        master_groups = self.products_data.groupby('KodMasterVyrobku')
-        simple_products = self.products_data[self.products_data['KodMasterVyrobku'].isna()]
+        # Nejprve detekujeme varianty podle SKU vzoru
+        sku_groups = self._group_products_by_sku_pattern()
         
-        # Zpracování jednoduchých produktů
+        # Zpracování jednoduchých produktů (ty co nejsou součástí žádné skupiny variant)
+        simple_products = []
+        for _, product in self.products_data.iterrows():
+            sku = str(product['KodZbozi'])
+            if sku not in sku_groups['all_variant_skus']:
+                simple_products.append(product)
+        
         logger.info(f"Zpracovávám {len(simple_products)} jednoduchých produktů")
-        for _, product in simple_products.iterrows():
+        for product in simple_products:
             woo_product = self._create_woo_product(product, 'simple')
             self.woo_products.append(woo_product)
         
         # Zpracování variabilních produktů
-        variable_groups = master_groups.size()
-        variable_groups = variable_groups[variable_groups > 1]
+        logger.info(f"Zpracovávám {len(sku_groups['parent_groups'])} skupin variabilních produktů")
         
-        logger.info(f"Zpracovávám {len(variable_groups)} skupin variabilních produktů")
-        
-        for master_code, group in master_groups:
-            if pd.isna(master_code) or len(group) <= 1:
+        for parent_sku, variant_skus in sku_groups['parent_groups'].items():
+            # Najdeme všechny produkty této skupiny
+            group_products = self.products_data[self.products_data['KodZbozi'].isin([parent_sku] + variant_skus)]
+            
+            if len(group_products) <= 1:
+                # Pokud je jen jeden produkt, zpracujeme ho jako simple
+                if len(group_products) == 1:
+                    woo_product = self._create_woo_product(group_products.iloc[0], 'simple')
+                    self.woo_products.append(woo_product)
                 continue
             
-            # Hlavní variabilní produkt
-            main_product = group.iloc[0].copy()
-            main_product['JmenoZbozi'] = self._create_parent_name(group)
+            # Najdeme parent produkt (ten s base SKU)
+            parent_row = self.products_data[self.products_data['KodZbozi'] == parent_sku]
+            if parent_row.empty:
+                # Pokud parent neexistuje, použijeme první variantu jako základ
+                parent_row = group_products.iloc[0].copy()
+            else:
+                parent_row = parent_row.iloc[0].copy()
+            
+            # Upravíme název parent produktu
+            parent_row['JmenoZbozi'] = self._create_parent_name(group_products)
             
             # Vytvoření parent produktu
-            parent_product = self._create_woo_product(main_product, 'variable')
-            parent_product['SKU'] = f"{master_code}_parent"
+            parent_product = self._create_woo_product(parent_row, 'variable')
+            parent_product['SKU'] = f"{parent_sku}_parent"
             
-            # Přidání souhrnných atributů
-            parent_attributes = self._create_parent_attributes(group)
+            # ZMĚNA: Nastavíme Parent i pro parent produkt na stejnou hodnotu jako mají varianty
+            parent_product['Parent'] = f"{parent_sku}_parent"
+            
+            # Přidání souhrnných atributů ze všech variant
+            parent_attributes = self._create_parent_attributes(group_products)
             parent_product.update(parent_attributes)
             
             # Výpočet skladových zásob
-            in_stock, stock = self._calculate_parent_stock(group)
+            in_stock, stock = self._calculate_parent_stock(group_products)
             parent_product['In stock?'] = in_stock
             parent_product['Stock'] = stock
             parent_product['Manage stock?'] = ''  # Variable produkty neřídí stock přímo
             
             self.woo_products.append(parent_product)
             
-            # Varianty
-            for _, variant in group.iterrows():
-                variant_product = self._create_woo_product(variant, 'variation', f"{master_code}_parent")
+            # Zpracování variant
+            for _, variant in group_products.iterrows():
+                variant_sku = str(variant['KodZbozi'])
+                # Přeskočíme parent SKU, pokud existuje v datech
+                if variant_sku == parent_sku and len(group_products) > 1:
+                    continue
+                    
+                variant_product = self._create_woo_product(variant, 'variation', f"{parent_sku}_parent")
                 self.woo_products.append(variant_product)
         
         logger.info(f"Vytvořeno celkem {len(self.woo_products)} WooCommerce produktů")
         
         # Debug výstup pokud je povoleno
         self._debug_product_structure()
+
+    def _group_products_by_sku_pattern(self) -> Dict:
+        """
+        Seskupí produkty podle SKU vzoru pro detekci variant.
+        Např. 033201, 033201_2, 033201_3 nebo GZ5067, GZ5067_2, GZ5067_3
+        nebo TOPS.2121.IN, TOPS.2121.IN_2 budou seskupeny dohromady.
         
-        # Debug výstup pokud je povoleno
-        self._debug_product_structure()
+        Returns:
+            Dict obsahující:
+                - parent_groups: Dict[str, List[str]] - mapování parent SKU na seznam variant SKU
+                - all_variant_skus: Set[str] - všechny SKU které jsou součástí nějaké skupiny variant
+        """
+        import re
+        
+        # Nejprve najdeme všechny base SKU které mají varianty
+        base_skus_with_variants = set()
+        all_skus = set()
+        
+        for _, product in self.products_data.iterrows():
+            sku = str(product['KodZbozi'])
+            all_skus.add(sku)
+            
+            # Pokud má SKU podtržítko následované číslem, je to varianta
+            if '_' in sku:
+                # Regex který zachytí jakýkoliv base SKU (včetně teček, pomlček atd.)
+                # před podtržítkem a číslem
+                match = re.match(r'^(.+?)_\d+$', sku)
+                if match:
+                    base_sku = match.group(1)
+                    base_skus_with_variants.add(base_sku)
+        
+        # Nyní vytvoříme skupiny
+        parent_groups = {}
+        all_variant_skus = set()
+        
+        for base_sku in base_skus_with_variants:
+            parent_groups[base_sku] = []
+            
+            # Najdeme všechny varianty tohoto base SKU
+            for sku in all_skus:
+                if re.match(f'^{re.escape(base_sku)}_\\d+$', sku):
+                    parent_groups[base_sku].append(sku)
+                    all_variant_skus.add(sku)
+            
+            # Přidáme také base SKU do all_variant_skus
+            # (bude zpracováno jako součást skupiny variant)
+            if base_sku in all_skus:
+                all_variant_skus.add(base_sku)
+        
+        logger.info(f"Detekováno {len(parent_groups)} skupin variant")
+        for parent_sku, variants in parent_groups.items():
+            logger.debug(f"Skupina {parent_sku}: parent + {len(variants)} variant")
+        
+        return {
+            'parent_groups': parent_groups,
+            'all_variant_skus': all_variant_skus
+        }
 
     def _create_parent_name(self, variants_group: pd.DataFrame) -> str:
         """Vytvoří název pro hlavní variabilní produkt na základě configu."""
