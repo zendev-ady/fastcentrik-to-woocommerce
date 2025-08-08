@@ -106,11 +106,15 @@ class WebToffeeTransformer:
         
         return ' > '.join(path)
     
-    def _get_product_images(self, main_image: str, additional_images: str) -> str:
+    def _get_product_images(self, row: pd.Series) -> str:
         """
-        Sestaví seznam obrázků produktu s použitím base URL.
+        Sestaví seznam obrázků produktu z řádku DataFrame s použitím base URL.
         WebToffee používá pipe | jako oddělovač.
         """
+        main_image = row.get('HlavniObrazek')
+        additional_images = row.get('DalsiObrazky')
+        sku = row.get('KodZbozi', 'N/A')
+
         images = []
         base_url = IMAGE_BASE_URL.strip('/')
         
@@ -124,42 +128,13 @@ class WebToffeeTransformer:
                     image_path = img.strip().lstrip('/')
                     images.append(f"{base_url}/{image_path}")
         
+        if not images:
+            logger.debug(f"Pro SKU {sku} nebyly nalezeny žádné cesty k obrázkům.")
+
         return '|'.join(images)
 
-    def _get_all_variant_images(self, variants_group: List[pd.Series]) -> str:
-        """Sestaví seznam všech unikátních obrázků z dané skupiny variant."""
-        all_image_paths = []
-        seen_images = set()
-        logger.info(f"Aggregating images for group of {len(variants_group)} variants.")
-
-        for i, variant in enumerate(variants_group):
-            main_image = variant.get('HlavniObrazek')
-            additional_images = variant.get('DalsiObrazky')
-            logger.debug(f"Variant {i} SKU {variant.get('KodZbozi')}: main='{main_image}', additional='{additional_images}'")
-
-            # Zpracování hlavního obrázku
-            if pd.notna(main_image) and main_image.strip():
-                if main_image not in seen_images:
-                    all_image_paths.append(main_image.strip())
-                    seen_images.add(main_image)
-                    logger.debug(f"Added main image: {main_image}")
-
-            # Zpracování dalších obrázků
-            if pd.notna(additional_images) and additional_images.strip():
-                for img in additional_images.split(';'):
-                    img_stripped = img.strip()
-                    if img_stripped and img_stripped not in seen_images:
-                        all_image_paths.append(img_stripped)
-                        seen_images.add(img_stripped)
-                        logger.debug(f"Added additional image: {img_stripped}")
-
-        # Sestavení finálního řetězce obrázků
-        base_url = IMAGE_BASE_URL.strip('/')
-        image_urls = [f"{base_url}/{img.lstrip('/')}" for img in all_image_paths]
-        
-        final_image_string = '|'.join(image_urls)
-        logger.info(f"Aggregated {len(image_urls)} unique images for the group: {final_image_string[:100]}...")
-        return final_image_string
+    # Metoda _get_all_variant_images byla odstraněna - není potřeba
+    # Používáme konzistentně _get_product_images pro všechny typy produktů
     
     def _format_price(self, price: any) -> str:
         """Formátuje cenu - převede čárku na tečku."""
@@ -312,11 +287,12 @@ class WebToffeeTransformer:
             first_attr_value = next(iter(variant_attrs.values()), "")
             short_description = f"{first_attr_name}: {first_attr_value}"
             
+            # SKU pro variantu bude doplněno později při zpracování skupiny variant
             woo_product = {
                 'ID': product_id,
                 'post_parent': parent_id,
                 'parent_sku': parent_sku,
-                'sku': '',  # Varianty mají prázdné SKU
+                'sku': '',  # bude doplněno jako {parentSKU}_{index}
                 'post_title': str(row['JmenoZbozi']),
                 'post_excerpt': short_description,
                 'post_content': str(row.get('Popis', '')) if pd.notna(row.get('Popis')) else '',
@@ -346,7 +322,7 @@ class WebToffeeTransformer:
             sale_price = self._format_price(row.get('ZakladniCena', ''))
             description = str(row.get('Popis', '')) if pd.notna(row.get('Popis')) else ''
             short_description = str(row.get('KratkyPopis', '')) if pd.notna(row.get('KratkyPopis')) else ''
-            images = self._get_product_images(row.get('HlavniObrazek'), row.get('DalsiObrazky'))
+            images = self._get_product_images(row)
             stock_quantity = row.get('NaSklade', 0)
             stock_status = 'instock' if stock_quantity > 0 else 'outofstock'
             post_status = 'publish' if row.get('Vypnuto', 0) == 0 else 'draft'
@@ -497,71 +473,121 @@ class WebToffeeTransformer:
     def _transform_products(self) -> None:
         """Hlavní metoda pro transformaci produktů."""
         logger.info("Zahajuji transformaci produktů do WebToffee formátu")
-        
+
         # Detekce variant - prioritně podle KodMasterVyrobku
         variant_groups = self._group_products_by_master_code()
-        
-        # Pokud nejsou master kódy, zkusíme SKU pattern
         if not variant_groups:
             logger.info("KodMasterVyrobku nenalezen, zkouším detekci podle SKU vzoru")
             variant_groups = self._group_products_by_sku_pattern()
-        
-        # Množina všech SKU které jsou součástí variant
-        variant_skus = set()
-        for group in variant_groups.values():
-            for product in group:
-                variant_skus.add(str(product['KodZbozi']))
-        
-        # Zpracování jednoduchých produktů
-        simple_count = 0
-        for _, product in self.products_data.iterrows():
-            sku = str(product['KodZbozi'])
-            if sku not in variant_skus:
-                woo_product = self._create_woo_product(product, 'simple')
-                self.woo_products.append(woo_product)
-                simple_count += 1
-        
-        logger.info(f"Zpracováno {simple_count} jednoduchých produktů")
-        
-        # Zpracování variabilních produktů
+
+        # --> ENHANCED DIAGNOSTIC BLOCK
+        if variant_groups:
+            logger.info("\n" + "="*80)
+            logger.info("DIAGNOSTIKA ZPRACOVÁNÍ VARIANT A OBRÁZKŮ")
+            logger.info("="*80)
+            
+            # Analyzujeme první skupinu variant
+            first_master_code = next(iter(variant_groups))
+            if first_master_code in variant_groups:
+                first_group = variant_groups[first_master_code]
+                logger.info(f"\nAnalýza první skupiny variant:")
+                logger.info(f"Master Code: {first_master_code}")
+                logger.info(f"Počet variant: {len(first_group)}")
+                logger.info("-" * 70)
+                
+                # Detailní výpis dat každé varianty
+                for i, product_row in enumerate(first_group):
+                    sku = product_row.get('KodZbozi', 'N/A')
+                    name = product_row.get('JmenoZbozi', 'N/A')
+                    main_img = product_row.get('HlavniObrazek', 'N/A')
+                    add_imgs = product_row.get('DalsiObrazky', 'N/A')
+                    params = product_row.get('HodnotyParametru', 'N/A')
+                    
+                    logger.info(f"\nVarianta {i}:")
+                    logger.info(f"  SKU: '{sku}'")
+                    logger.info(f"  Název: '{name}'")
+                    logger.info(f"  Hlavní obrázek: '{main_img}'")
+                    logger.info(f"  Další obrázky: '{add_imgs}'")
+                    logger.info(f"  Parametry: '{params}'")
+                    
+                    # Extrakce variant atributů pro diagnostiku
+                    variant_attrs = self._extract_variant_attributes(product_row)
+                    if variant_attrs:
+                        logger.info(f"  Variantní atributy: {variant_attrs}")
+                    else:
+                        logger.info(f"  -> Toto je pravděpodobně MASTER produkt (žádné variantní atributy)")
+                
+                logger.info("-" * 70)
+                logger.info("Nyní bude následovat agregace obrázků pro tuto skupinu...")
+                logger.info("="*80 + "\n")
+        # <-- END ENHANCED DIAGNOSTIC BLOCK
+
+        processed_skus = set()
         variable_count = 0
         variation_count = 0
         
+        # 1. Zpracování všech variabilních produktů
+        logger.info(f"Zpracovávám {len(variant_groups)} skupin variant...")
         for master_code, variants in variant_groups.items():
-            # Vytvoření parent produktu
-            first_variant = variants[0]
-            parent_sku = master_code  # SKU parenta je master_code
+            # Přidání SKU všech variant do `processed_skus`, aby se nevytvořily jako Simple
+            for v in variants:
+                processed_skus.add(str(v['KodZbozi']))
             
-            # Upravíme název parent produktu
+            if not variants:
+                logger.warning(f"Skupina variant pro master_code '{master_code}' je prázdná, přeskakuji.")
+                continue
+
+            first_variant = variants[0]
+            parent_sku = master_code
+
             parent_data = first_variant.copy()
             parent_data['JmenoZbozi'] = self._create_parent_name(variants)
             
-            # Vytvoříme agregované atributy ze všech variant
             variants_df = pd.DataFrame(variants)
             parent_attributes = self._create_parent_attributes(variants_df)
-            
-            # Vytvoření parent produktu
+
             parent_product = self._create_woo_product(
                 parent_data,
                 'variable',
                 parent_attributes=parent_attributes
             )
             parent_product['sku'] = parent_sku
-            parent_product['post_parent'] = ''  # Parent nemá parent
+            parent_product['post_parent'] = ''
+
+            # FIX: Use the standard _get_product_images method instead of _get_all_variant_images
+            # Since variants don't have their own images, we use the parent_data which is based on first_variant
+            # This ensures consistent image URL formatting with simple products
+            logger.info(f"\n>>> Získávám obrázky pro parent SKU: {parent_sku}")
+            parent_images = self._get_product_images(parent_data)
+            parent_product['images'] = parent_images
             
-            # Správné přiřazení obrázků k parent produktu
-            aggregated_images = self._get_all_variant_images(variants)
-            parent_product['images'] = aggregated_images
-            logger.info(f"Assigned {len(aggregated_images.split('|')) if aggregated_images else 0} images to parent {parent_sku}")
+            # Detailní diagnostika přiřazených obrázků
+            if parent_images:
+                image_count = len(parent_images.split('|'))
+                logger.info(f"<<< Parent {parent_sku}: přiřazeno {image_count} obrázků")
+                logger.info(f"    Obrázky: {parent_images[:300]}...")
+            else:
+                # If first variant has no images, try other variants
+                logger.warning(f"První varianta nemá obrázky, zkouším další varianty...")
+                for variant in variants[1:]:
+                    variant_images = self._get_product_images(variant)
+                    if variant_images:
+                        parent_product['images'] = variant_images
+                        image_count = len(variant_images.split('|'))
+                        logger.info(f"<<< Nalezeny obrázky ve variantě {variant.get('KodZbozi')}: {image_count} obrázků")
+                        break
+                
+                if not parent_product['images']:
+                    logger.warning(f"<<< Parent {parent_sku} nemá žádné obrázky v žádné variantě")
             
-            # Uložíme ID parent produktu pro varianty
             parent_id = parent_product['ID']
             self.parent_id_mapping[parent_sku] = parent_id
             
             self.woo_products.append(parent_product)
             variable_count += 1
+            processed_skus.add(parent_sku)
 
-            # Seřadit varianty pro správné menu_order
+            # Seřazení variant
             def natural_sort_key(s):
                 if isinstance(s, str):
                     return [int(t) if t.isdigit() else t.lower() for t in re.split(r'(\d+)', s)]
@@ -569,7 +595,6 @@ class WebToffeeTransformer:
 
             primary_attr_name = VARIANT_SETTINGS.get('variant_attributes', ['velikost'])[0]
             
-            # Dočasně přidáme klíč pro řazení
             for v in variants:
                 attrs = self._extract_variant_attributes(v)
                 v['sort_key'] = attrs.get(primary_attr_name, '')
@@ -577,20 +602,49 @@ class WebToffeeTransformer:
             variants_sorted = sorted(variants, key=lambda v: natural_sort_key(v['sort_key']))
 
             # Zpracování jednotlivých variant
+            all_current_skus = {p['sku'] for p in self.woo_products}
+            
             for i, variant in enumerate(variants_sorted):
+                variant_index = i + 1
+                base_variant_sku = f"{parent_sku}_{variant_index}"
+                unique_variant_sku = base_variant_sku
+                
+                bump = 1
+                while unique_variant_sku in all_current_skus:
+                    bump += 1
+                    unique_variant_sku = f"{parent_sku}_{variant_index}_v{bump}"
+                
                 variant_product = self._create_woo_product(
                     variant,
                     'simple',
                     parent_id=parent_id,
                     is_variation=True,
                     parent_sku=parent_sku,
-                    menu_order=i + 1
+                    menu_order=variant_index
                 )
+                variant_product['sku'] = unique_variant_sku
+                all_current_skus.add(unique_variant_sku)
+
                 self.woo_products.append(variant_product)
                 variation_count += 1
         
-        logger.info(f"Vytvořeno {variable_count} variable produktů a {variation_count} variant")
-        logger.info(f"Celkem vytvořeno {len(self.woo_products)} produktů")
+        logger.info(f"Vytvořeno {variable_count} variable produktů a {variation_count} variant.")
+        logger.info(f"{len(processed_skus)} SKU označeno jako zpracované (varianty a jejich rodiče).")
+
+        # 2. Zpracování jednoduchých produktů
+        simple_count = 0
+        logger.info("Zpracovávám jednoduché produkty...")
+        for _, product in self.products_data.iterrows():
+            sku = str(product['KodZbozi'])
+            if sku not in processed_skus:
+                woo_product = self._create_woo_product(product, 'simple')
+                if woo_product['sku'] not in processed_skus:
+                    self.woo_products.append(woo_product)
+                    simple_count += 1
+                    processed_skus.add(woo_product['sku'])
+
+        logger.info(f"Zpracováno {simple_count} jednoduchých produktů.")
+        logger.info(f"Celkem vytvořeno {len(self.woo_products)} produktů (včetně variant).")
     
     def validate_products(self) -> List[str]:
         """Validuje vytvořené produkty."""
@@ -599,7 +653,14 @@ class WebToffeeTransformer:
         # Najít všechny parent produkty a jejich SKUs
         parent_ids = set()
         parent_skus_from_parents = set()
+        seen_skus = set()
         for product in self.woo_products:
+            sku_val = product.get('sku', '')
+            if sku_val:
+                if sku_val in seen_skus:
+                    errors.append(f"Duplicita SKU: '{sku_val}' se vyskytuje vícekrát.")
+                seen_skus.add(sku_val)
+
             if product['tax:product_type'] == 'Variable':
                 parent_ids.add(product['ID'])
                 parent_skus_from_parents.add(product['sku'])
@@ -610,15 +671,19 @@ class WebToffeeTransformer:
                 # Kontrola post_parent
                 if product['post_parent'] not in parent_ids:
                     errors.append(f"Varianta '{product['post_title']}' (parent_sku: {product['parent_sku']}) odkazuje на neexistující parent ID {product['post_parent']}")
-
+ 
                 # Kontrola parent_sku
                 if product['parent_sku'] not in parent_skus_from_parents:
                     errors.append(f"Varianta '{product['post_title']}' odkazuje na neexistující parent SKU {product['parent_sku']}.")
-
-                # Kontrola prázdného SKU
-                if product['sku'] != '':
-                    errors.append(f"Varianta '{product['post_title']}' (parent_sku: {product['parent_sku']}) by měla mít prázdné SKU, ale má '{product['sku']}'.")
-
+ 
+                # Kontrola, že varianta má vyplněné SKU podle pravidla
+                if not product.get('sku'):
+                    errors.append(f"Varianta '{product['post_title']}' (parent_sku: {product['parent_sku']}) nemá přiřazené SKU.")
+                else:
+                    # Formát {parentSKU}_<cislo>
+                    if not re.match(rf"^{re.escape(product['parent_sku'])}_\d+$", product['sku']):
+                        errors.append(f"Varianta '{product['post_title']}' má SKU '{product['sku']}', které neodpovídá formátu {product['parent_sku']}_<číslo>.")
+ 
                 # Kontrola meta atributů (varianty mají pouze meta:attribute_pa_*)
                 has_meta_attributes = any(
                     key.startswith('meta:attribute_pa_') and product.get(key)
@@ -637,9 +702,6 @@ class WebToffeeTransformer:
                 )
                 if not has_attributes:
                     errors.append(f"Variable produkt {product['sku']} nemá žádné atributy")
-                
-                # Variable produkty mohou mít stock ve WebToffee
-                pass
         
         return errors
     
@@ -678,15 +740,15 @@ class WebToffeeTransformer:
         variable_count = len([p for p in self.woo_products if p['tax:product_type'] == 'Variable'])
         variation_count = len([p for p in self.woo_products if p['tax:product_type'] == ''])  # Varianty mají prázdný typ
         
-        print("\n" + "="*50)
-        print("STATISTIKY WEBTOFFEE TRANSFORMACE")
-        print("="*50)
-        print(f"Celkem FastCentrik produktů: {len(self.products_data)}")
-        print(f"Celkem WebToffee produktů: {len(self.woo_products)}")
-        print(f"  - Jednoduché produkty: {simple_count}")
-        print(f"  - Variable produkty: {variable_count}")
-        print(f"  - Varianty: {variation_count}")
-        print(f"Celkem kategorií: {len(self.category_mapping)}")
+        logger.info("\n" + "="*50)
+        logger.info("STATISTIKY WEBTOFFEE TRANSFORMACE")
+        logger.info("="*50)
+        logger.info(f"Celkem FastCentrik produktů: {len(self.products_data)}")
+        logger.info(f"Celkem WebToffee produktů: {len(self.woo_products)}")
+        logger.info(f"  - Jednoduché produkty: {simple_count}")
+        logger.info(f"  - Variable produkty: {variable_count}")
+        logger.info(f"  - Varianty: {variation_count}")
+        logger.info(f"Celkem kategorií: {len(self.category_mapping)}")
         if self.validation_errors:
-            print(f"⚠️  Validační chyby: {len(self.validation_errors)}")
-        print("="*50)
+            logger.warning(f"⚠️  Validační chyby: {len(self.validation_errors)}")
+        logger.info("="*50)
