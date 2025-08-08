@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Set, Optional
 import logging
 import sys
+import html
+from html.parser import HTMLParser
 
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -36,6 +38,38 @@ from src.fastcentrik_woocommerce.mappers.category_mapper import CategoryMapper
 # Nastavení logování
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+class HTMLStripper(HTMLParser):
+    """
+    Pomocná třída pro odstranění HTML tagů.
+    Zachovává pouze textový obsah a tagy pro ztučnění textu (<b> a <strong>).
+    """
+    def __init__(self):
+        super().__init__()
+        self.reset()
+        self.strict = False
+        self.convert_charrefs = True
+        self.result = []
+        self.in_bold = False
+        
+    def handle_starttag(self, tag, attrs):
+        # Zachováme tagy pro ztučnění textu
+        if tag in ('b', 'strong'):
+            self.in_bold = True
+            self.result.append(f'<{tag}>')
+            
+    def handle_endtag(self, tag):
+        # Zachováme tagy pro ztučnění textu
+        if tag in ('b', 'strong') and self.in_bold:
+            self.in_bold = False
+            self.result.append(f'</{tag}>')
+        
+    def handle_data(self, data):
+        self.result.append(data)
+        
+    def get_text(self):
+        return ''.join(self.result)
 
 
 class WebToffeeTransformer:
@@ -111,22 +145,34 @@ class WebToffeeTransformer:
         Sestaví seznam obrázků produktu z řádku DataFrame s použitím base URL.
         WebToffee používá pipe | jako oddělovač.
         """
+        # DEBUG: Log all column names to identify potential image columns
+        logger.debug(f"DEBUG: Dostupné sloupce v DataFrame: {list(row.index)}")
+        
         main_image = row.get('HlavniObrazek')
         additional_images = row.get('DalsiObrazky')
         sku = row.get('KodZbozi', 'N/A')
-
+        
+        # DEBUG: Log the values of potential image columns
+        logger.debug(f"DEBUG: SKU: {sku}, HlavniObrazek: {main_image}, DalsiObrazky: {additional_images}")
+        
         images = []
         base_url = IMAGE_BASE_URL.strip('/')
         
         if pd.notna(main_image) and main_image.strip():
             image_path = main_image.strip().lstrip('/')
             images.append(f"{base_url}/{image_path}")
+            logger.debug(f"DEBUG: Přidán hlavní obrázek: {image_path}")
+        else:
+            logger.debug(f"DEBUG: Hlavní obrázek je prázdný nebo None")
         
         if pd.notna(additional_images) and additional_images.strip():
             for img in additional_images.split(';'):
                 if img.strip():
                     image_path = img.strip().lstrip('/')
                     images.append(f"{base_url}/{image_path}")
+                    logger.debug(f"DEBUG: Přidán další obrázek: {image_path}")
+        else:
+            logger.debug(f"DEBUG: Další obrázky jsou prázdné nebo None")
         
         if not images:
             logger.debug(f"Pro SKU {sku} nebyly nalezeny žádné cesty k obrázkům.")
@@ -142,6 +188,32 @@ class WebToffeeTransformer:
             return ''
         return str(price).replace(',', '.')
     
+    def _clean_html(self, html_content: str) -> str:
+        """
+        Odstraní HTML tagy a entity z textu, kromě tagů pro ztučnění textu (<b> a <strong>).
+        
+        Args:
+            html_content (str): Text s HTML formátováním
+            
+        Returns:
+            str: Text s odstraněnými HTML tagy kromě <b> a <strong>
+        """
+        if not html_content or pd.isna(html_content):
+            return ''
+            
+        # Odstranění HTML tagů kromě <b> a <strong>
+        stripper = HTMLStripper()
+        stripper.feed(html_content)
+        text = stripper.get_text()
+        
+        # Dekódování HTML entit
+        text = html.unescape(text)
+        
+        # Odstranění nadbytečných mezer a prázdných řádků
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
+        
     def _extract_variant_attributes(self, row: pd.Series) -> Dict[str, str]:
         """Extrahuje atributy varianty z parametrů nebo názvu."""
         params = parse_parameters(row.get('HodnotyParametru', ''))
@@ -295,7 +367,7 @@ class WebToffeeTransformer:
                 'sku': '',  # bude doplněno jako {parentSKU}_{index}
                 'post_title': str(row['JmenoZbozi']),
                 'post_excerpt': short_description,
-                'post_content': str(row.get('Popis', '')) if pd.notna(row.get('Popis')) else '',
+                'post_content': self._clean_html(str(row.get('Popis', '')) if pd.notna(row.get('Popis')) else ''),
                 'post_status': 'publish' if row.get('Vypnuto', 0) == 0 else 'draft',
                 'regular_price': self._format_price(row.get('CenaBezna', '')),
                 'sale_price': self._format_price(row.get('ZakladniCena', '')) if pd.notna(row.get('ZakladniCena')) else '',
@@ -347,7 +419,7 @@ class WebToffeeTransformer:
                 'sku': sku,
                 'post_title': name,
                 'post_excerpt': short_description,
-                'post_content': description,
+                'post_content': self._clean_html(description),
                 'post_status': post_status,
                 'regular_price': regular_price,
                 'sale_price': sale_price if sale_price != regular_price else '',
@@ -537,11 +609,33 @@ class WebToffeeTransformer:
                 logger.warning(f"Skupina variant pro master_code '{master_code}' je prázdná, přeskakuji.")
                 continue
 
-            first_variant = variants[0]
-            parent_sku = master_code
-
-            parent_data = first_variant.copy()
-            parent_data['JmenoZbozi'] = self._create_parent_name(variants)
+            # KRITICKÁ OPRAVA: Nejprve zkontrolujeme, zda existuje produkt s KodZbozi = master_code
+            # Tento produkt by měl být použit jako parent, protože obsahuje obrázky
+            logger.info(f"Hledám produkt s KodZbozi={master_code} pro použití jako parent...")
+            
+            # Vytvoříme kopii celého DataFrame pro vyhledávání
+            all_products_df = self.products_data.copy()
+            
+            # Hledáme produkt s KodZbozi = master_code
+            parent_product_rows = all_products_df[all_products_df['KodZbozi'] == master_code]
+            
+            if len(parent_product_rows) > 0:
+                # Použijeme existující produkt jako parent
+                logger.info(f"Nalezen existující produkt s KodZbozi={master_code}, použiji ho jako parent")
+                parent_data = parent_product_rows.iloc[0].copy()
+                parent_sku = master_code
+                
+                # Vypíšeme informace o obrázcích pro diagnostiku
+                logger.info(f"Parent produkt má tyto obrázky:")
+                logger.info(f"  HlavniObrazek: {parent_data.get('HlavniObrazek', 'N/A')}")
+                logger.info(f"  DalsiObrazky: {parent_data.get('DalsiObrazky', 'N/A')}")
+            else:
+                # Fallback na původní logiku - použijeme první variantu
+                logger.info(f"Nenalezen existující produkt s KodZbozi={master_code}, použiji první variantu jako parent")
+                first_variant = variants[0]
+                parent_sku = master_code
+                parent_data = first_variant.copy()
+                parent_data['JmenoZbozi'] = self._create_parent_name(variants)
             
             variants_df = pd.DataFrame(variants)
             parent_attributes = self._create_parent_attributes(variants_df)
@@ -558,6 +652,48 @@ class WebToffeeTransformer:
             # Since variants don't have their own images, we use the parent_data which is based on first_variant
             # This ensures consistent image URL formatting with simple products
             logger.info(f"\n>>> Získávám obrázky pro parent SKU: {parent_sku}")
+            
+            # DEBUG: Log parent_data columns and values
+            logger.debug(f"DEBUG: parent_data sloupce: {list(parent_data.index)}")
+            logger.debug(f"DEBUG: parent_data KodZbozi: {parent_data.get('KodZbozi', 'N/A')}")
+            
+            # Check if the product has the expected image columns
+            if 'HlavniObrazek' not in parent_data or 'DalsiObrazky' not in parent_data:
+                logger.warning(f"DEBUG: Produkt nemá očekávané sloupce s obrázky!")
+                # Try to identify image columns by looking at all columns
+                for col in parent_data.index:
+                    val = parent_data.get(col)
+                    if pd.notna(val) and isinstance(val, str) and ('/images/' in val or '.jpg' in val or '.png' in val):
+                        logger.info(f"DEBUG: Potenciální sloupec s obrázkem: {col} = {val[:100]}...")
+            
+            # Explicitně zkontrolujeme hodnoty obrázků
+            hlavni_obrazek = parent_data.get('HlavniObrazek')
+            dalsi_obrazky = parent_data.get('DalsiObrazky')
+            
+            logger.info(f"Hodnoty obrázků v parent_data:")
+            logger.info(f"  HlavniObrazek: {hlavni_obrazek}")
+            logger.info(f"  DalsiObrazky: {dalsi_obrazky}")
+            
+            # Kontrola, zda jsou hodnoty NaN
+            if pd.isna(hlavni_obrazek) and pd.isna(dalsi_obrazky):
+                logger.warning(f"Obě hodnoty obrázků jsou NaN, zkusím najít produkt s obrázky v celém DataFrame")
+                
+                # Hledáme produkt s KodZbozi = master_code v celém DataFrame
+                all_products_with_images = self.products_data[
+                    (self.products_data['KodZbozi'] == master_code) &
+                    (self.products_data['HlavniObrazek'].notna() | self.products_data['DalsiObrazky'].notna())
+                ]
+                
+                if len(all_products_with_images) > 0:
+                    logger.info(f"Nalezen produkt s obrázky v celém DataFrame, použiji ho pro obrázky")
+                    image_product = all_products_with_images.iloc[0]
+                    parent_data['HlavniObrazek'] = image_product['HlavniObrazek']
+                    parent_data['DalsiObrazky'] = image_product['DalsiObrazky']
+                    
+                    logger.info(f"Nové hodnoty obrázků:")
+                    logger.info(f"  HlavniObrazek: {parent_data['HlavniObrazek']}")
+                    logger.info(f"  DalsiObrazky: {parent_data['DalsiObrazky']}")
+            
             parent_images = self._get_product_images(parent_data)
             parent_product['images'] = parent_images
             
@@ -569,7 +705,11 @@ class WebToffeeTransformer:
             else:
                 # If first variant has no images, try other variants
                 logger.warning(f"První varianta nemá obrázky, zkouším další varianty...")
-                for variant in variants[1:]:
+                for i, variant in enumerate(variants[1:]):
+                    logger.debug(f"DEBUG: Zkouším variantu {i+2}, SKU: {variant.get('KodZbozi', 'N/A')}")
+                    # Log variant columns
+                    logger.debug(f"DEBUG: Sloupce varianty: {list(variant.index)}")
+                    
                     variant_images = self._get_product_images(variant)
                     if variant_images:
                         parent_product['images'] = variant_images
@@ -579,6 +719,9 @@ class WebToffeeTransformer:
                 
                 if not parent_product['images']:
                     logger.warning(f"<<< Parent {parent_sku} nemá žádné obrázky v žádné variantě")
+            
+            # Uložíme si obrázky parent produktu pro pozdější použití u variant
+            parent_images_for_variants = parent_product.get('images', '')
             
             parent_id = parent_product['ID']
             self.parent_id_mapping[parent_sku] = parent_id
@@ -624,6 +767,11 @@ class WebToffeeTransformer:
                 )
                 variant_product['sku'] = unique_variant_sku
                 all_current_skus.add(unique_variant_sku)
+                
+                # Přidáme obrázky z parent produktu i do variant
+                if parent_images_for_variants:
+                    variant_product['images'] = parent_images_for_variants
+                    logger.debug(f"Kopíruji obrázky z parent produktu do varianty {unique_variant_sku}")
 
                 self.woo_products.append(variant_product)
                 variation_count += 1

@@ -43,7 +43,23 @@ class WebToffeeCSVExporter:
         'length',
         'width',
         'height',
-        'images',
+        'images',  # Přidáno zpět - obsahuje všechny URL oddělené |
+        'fifu_image_url_0',  # Hlavní obrázek
+        'fifu_image_url_1',
+        'fifu_image_url_2',
+        'fifu_image_url_3',
+        'fifu_image_url_4',
+        'fifu_image_url_5',
+        'fifu_image_url_6',
+        'fifu_image_url_7',
+        'fifu_image_url_8',
+        'fifu_image_url_9',
+        'fifu_image_url_10',
+        'fifu_image_url_11',
+        'fifu_image_url_12',
+        'fifu_image_url_13',
+        'fifu_image_url_14',
+        'fifu_image_url_15',
         'tax:product_type',
         'tax:product_cat',
         'tax:product_tag',
@@ -82,8 +98,28 @@ class WebToffeeCSVExporter:
         Returns:
             DataFrame připravený k exportu
         """
+        # Vytvoříme kopii produktů pro zpracování
+        processed_products = []
+        
+        # Zpracujeme každý produkt a rozdělíme obrázky do samostatných sloupců
+        for product in products:
+            processed_product = product.copy()
+            
+            # Zpracování obrázků
+            if 'images' in processed_product and processed_product['images']:
+                # Rozdělíme obrázky podle oddělovače |
+                image_urls = processed_product['images'].split('|')
+                
+                # Zachováme původní sloupec images
+                # Přidáme jednotlivé obrázky do samostatných sloupců
+                for i, url in enumerate(image_urls):
+                    if i <= 15:  # Maximálně 16 obrázků (0-15)
+                        processed_product[f'fifu_image_url_{i}'] = url
+            
+            processed_products.append(processed_product)
+        
         # Vytvoříme DataFrame
-        df = pd.DataFrame(products)
+        df = pd.DataFrame(processed_products)
         
         # Přidáme chybějící sloupce s výchozími hodnotami
         default_values = {
@@ -95,6 +131,12 @@ class WebToffeeCSVExporter:
             'tax_class': '',
             'shipping_class': ''
         }
+        
+        # Přidáme chybějící sloupce pro obrázky
+        for i in range(16):
+            image_col = f'fifu_image_url_{i}'
+            if image_col not in df.columns:
+                default_values[image_col] = ''
         
         for col, default_val in default_values.items():
             if col not in df.columns:
@@ -267,6 +309,12 @@ class WebToffeeCSVExporter:
         # Základní sloupce
         for col in self.WEBTOFFEE_COLUMNS:
             template_data[col] = ['']
+            
+        # Ujistíme se, že máme všechny sloupce pro obrázky
+        for i in range(16):
+            image_col = f'fifu_image_url_{i}'
+            if image_col not in template_data:
+                template_data[image_col] = ['']
         
         # Příkladové atributové sloupce s pa_ prefix
         template_data['attribute:pa_color'] = ['']
@@ -299,7 +347,9 @@ class WebToffeeCSVExporter:
                 'backorders': 'no',
                 'downloadable': 'no',
                 'virtual': 'no',
-                'menu_order': '0'
+                'menu_order': '0',
+                'fifu_image_url_0': 'https://example.com/images/product1.jpg',
+                'fifu_image_url_1': 'https://example.com/images/product1-2.jpg'
             },
             {
                 'ID': '1002',
@@ -320,7 +370,10 @@ class WebToffeeCSVExporter:
                 'backorders': 'no',
                 'downloadable': 'no',
                 'virtual': 'no',
-                'menu_order': '0'
+                'menu_order': '0',
+                'fifu_image_url_0': 'https://example.com/images/variable-main.jpg',
+                'fifu_image_url_1': 'https://example.com/images/variable-alt1.jpg',
+                'fifu_image_url_2': 'https://example.com/images/variable-alt2.jpg'
             },
             {
                 'ID': '1003',
