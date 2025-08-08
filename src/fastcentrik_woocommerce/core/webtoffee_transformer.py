@@ -15,15 +15,16 @@ import pandas as pd
 import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Set, Optional
-import logging
 import sys
 import html
+import logging
 from html.parser import HTMLParser
 
 # Add the project root to the Python path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
 from src.fastcentrik_woocommerce.utils.utils import create_slug, parse_parameters
+from src.fastcentrik_woocommerce.utils.logging_config import setup_logging
 from config.config import (
     SEO_SETTINGS,
     TAG_SETTINGS,
@@ -35,15 +36,15 @@ from config.config import (
 )
 from src.fastcentrik_woocommerce.mappers.category_mapper import CategoryMapper
 
-# Nastavení logování
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# Nastavení logování s novou konfigurací
+logger = setup_logging(__name__, log_level=logging.DEBUG)
 
 
 class HTMLStripper(HTMLParser):
     """
     Pomocná třída pro odstranění HTML tagů.
-    Zachovává pouze textový obsah a tagy pro ztučnění textu (<b> a <strong>).
+    Zachovává strukturální elementy jako <ul>, <li>, <h1>-<h6>, a tagy pro ztučnění textu (<b> a <strong>),
+    ale odstraňuje inline CSS.
     """
     def __init__(self):
         super().__init__()
@@ -51,19 +52,30 @@ class HTMLStripper(HTMLParser):
         self.strict = False
         self.convert_charrefs = True
         self.result = []
-        self.in_bold = False
+        self.tag_stack = []  # Stack to track nested tags
         
     def handle_starttag(self, tag, attrs):
-        # Zachováme tagy pro ztučnění textu
-        if tag in ('b', 'strong'):
-            self.in_bold = True
-            self.result.append(f'<{tag}>')
+        # List of allowed structural tags
+        allowed_tags = ('b', 'strong', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p')
+        
+        if tag in allowed_tags:
+            self.tag_stack.append(tag)
+            
+            # Filter out style attributes
+            filtered_attrs = [(name, value) for name, value in attrs if name.lower() != 'style']
+            
+            # Construct tag with remaining attributes
+            if filtered_attrs:
+                attr_str = ' '.join(f'{name}="{value}"' for name, value in filtered_attrs)
+                self.result.append(f'<{tag} {attr_str}>')
+            else:
+                self.result.append(f'<{tag}>')
             
     def handle_endtag(self, tag):
-        # Zachováme tagy pro ztučnění textu
-        if tag in ('b', 'strong') and self.in_bold:
-            self.in_bold = False
-            self.result.append(f'</{tag}>')
+        if tag in ('b', 'strong', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p'):
+            if self.tag_stack and self.tag_stack[-1] == tag:
+                self.tag_stack.pop()
+                self.result.append(f'</{tag}>')
         
     def handle_data(self, data):
         self.result.append(data)
@@ -190,13 +202,14 @@ class WebToffeeTransformer:
     
     def _clean_html(self, html_content: str) -> str:
         """
-        Odstraní HTML tagy a entity z textu, kromě tagů pro ztučnění textu (<b> a <strong>).
+        Odstraní HTML tagy a entity z textu, kromě strukturálních elementů a tagů pro ztučnění textu.
+        Zachovává tagy <ul>, <ol>, <li>, <h1>-<h6>, <p>, <b> a <strong>, ale odstraňuje inline CSS.
         
         Args:
             html_content (str): Text s HTML formátováním
             
         Returns:
-            str: Text s odstraněnými HTML tagy kromě <b> a <strong>
+            str: Text s odstraněnými HTML tagy kromě povolených strukturálních elementů
         """
         if not html_content or pd.isna(html_content):
             return ''

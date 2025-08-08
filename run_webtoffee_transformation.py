@@ -17,7 +17,6 @@ Autor: FastCentrik Migration Tool
 
 import sys
 from pathlib import Path
-import logging
 from datetime import datetime
 
 # Přidání projektu do Python path
@@ -26,17 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.fastcentrik_woocommerce.loaders.data_loader import DataLoader
 from src.fastcentrik_woocommerce.core.webtoffee_transformer import WebToffeeTransformer
 from src.fastcentrik_woocommerce.exporters.webtoffee_csv_exporter import WebToffeeCSVExporter
+from src.fastcentrik_woocommerce.utils.logging_config import get_transformation_logger
 
-# Nastavení logování
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(f'webtoffee_transformation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+# Nastavení logování s novou konfigurací
+logger = get_transformation_logger(__name__, "webtoffee")
 
 # Konstanty
 INPUT_FILE = "Export_Excel_Lite.xls"
